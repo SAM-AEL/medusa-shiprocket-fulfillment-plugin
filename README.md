@@ -70,7 +70,7 @@ This plugin is compatible with versions >= 2.4.0 of `@medusajs/medusa`.
               options: {
                 email: process.env.SHIPROCKET_EMAIL,
                 password: process.env.SHIPROCKET_PASSWORD,
-                pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION, // optional
+                pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION,
               },
             },
           ],
@@ -82,8 +82,6 @@ This plugin is compatible with versions >= 2.4.0 of `@medusajs/medusa`.
     ```
     SHIPROCKET_EMAIL=<your-shiprocket-email>
     SHIPROCKET_PASSWORD=<your-shiprocket-password>
-    SHIPROCKET_COD=<true-or-false>
-    SHIPROCKET_ALLOWED_COURIER_IDS=<comma-separated-courier-ids>
     SHIPROCKET_PICKUP_LOCATION=<your-pickup-location>
     ```
 
