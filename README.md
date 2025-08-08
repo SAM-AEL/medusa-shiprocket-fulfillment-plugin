@@ -25,12 +25,6 @@
   <a href="https://github.com/medusajs/medusa/blob/master/CONTRIBUTING.md">
     <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat" alt="PRs welcome!" />
   </a>
-  <a href="https://discord.gg/xpCwq3Kfn8">
-    <img src="https://img.shields.io/badge/chat-on%20discord-7289DA.svg" alt="Discord Chat" />
-  </a>
-  <a href="https://twitter.com/intent/follow?screen_name=medusajs">
-    <img src="https://img.shields.io/twitter/follow/medusajs.svg?label=Follow%20@medusajs" alt="Follow @medusajs" />
-  </a>
 </p>
 
 ## Features
@@ -57,26 +51,37 @@ This plugin is compatible with versions >= 2.4.0 of `@medusajs/medusa`.
     ```
 
 2.  **Configure the plugin:**
-    In your `medusa-config.js`, add the following to your `modules` object:
+    In your `medusa-config.ts`, add the following to your `modules` object:
     ```javascript
-    modules: [
-      {
-        resolve: "@medusajs/medusa/fulfillment",
-        options: {
-          providers: [
-            {
-              resolve: "medusa-shiprocket-fulfillment-plugin/providers/shiprocket",
-              id: "shiprocket-fulfillment",
-              options: {
-                email: process.env.SHIPROCKET_EMAIL,
-                password: process.env.SHIPROCKET_PASSWORD,
-                pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION,
-              },
-            },
-          ],
-        },
+    // medusa-config.ts
+    const { defineConfig } = require("@medusajs/medusa")
+
+    module.exports = defineConfig({
+      projectConfig: {
+        // ...other Medusa project config (database, redis, etc)
       },
-    ]
+      modules: [
+        // ...other Medusa modules
+        {
+          resolve: "@medusajs/medusa/fulfillment",
+          options: {
+            providers: [
+              {
+                resolve: "medusa-shiprocket-fulfillment-plugin/providers/shiprocket",
+                id: "shiprocket-fulfillment",
+                options: {
+                  email: process.env.SHIPROCKET_EMAIL,
+                  password: process.env.SHIPROCKET_PASSWORD,
+                  pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION,
+                },
+              },
+            ],
+          },
+        },
+        // ...other modules
+      ],
+      // ...other config (plugins, feature flags, etc)
+    })
 
 3.  **Add the following to your `.env` file:**
     ```
