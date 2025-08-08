@@ -1,4 +1,4 @@
-import { Courier } from "../types";
+import { Courier } from "./types";
 
 export function getCheapestCourier(couriers: Courier[]): Courier | null {
     const validCouriers = couriers.filter(

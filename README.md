@@ -8,8 +8,10 @@
   </a>
 </p>
 <h1 align="center">
-  Medusa Plugin Starter
+  Medusa Shiprocket Fulfillment Plugin
 </h1>
+
+> ⚠️ **WORK IN PROGRESS: This plugin is under active development. Do not use in a production environment.**
 
 <h4 align="center">
   <a href="https://docs.medusajs.com">Documentation</a> |
@@ -17,13 +19,12 @@
 </h4>
 
 <p align="center">
-  Building blocks for digital commerce
+  Shiprocket Fulfillment provider for MedusaJS v2.0+.
 </p>
 <p align="center">
   <a href="https://github.com/medusajs/medusa/blob/master/CONTRIBUTING.md">
     <img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat" alt="PRs welcome!" />
   </a>
-    <a href="https://www.producthunt.com/posts/medusa"><img src="https://img.shields.io/badge/Product%20Hunt-%231%20Product%20of%20the%20Day-%23DA552E" alt="Product Hunt"></a>
   <a href="https://discord.gg/xpCwq3Kfn8">
     <img src="https://img.shields.io/badge/chat-on%20discord-7289DA.svg" alt="Discord Chat" />
   </a>
@@ -32,17 +33,59 @@
   </a>
 </p>
 
+## Features
+
+*   **Rate Calculation:** Calculate shipping rates on checkout.
+*   **Fulfillment Creation:** Create fulfillments in Shiprocket.
+*   **Fulfillment Cancellation:** Cancel fulfillments in Shiprocket.
+*   **Tracking:** Get tracking information for fulfillments.
+
+## Future Features
+
+*   **Order Splitting:** Allow splitting an order into multiple shipments.
+*   **Return Management:** Handle returns and reverse shipments through Shiprocket.
+
 ## Compatibility
 
-This starter is compatible with versions >= 2.4.0 of `@medusajs/medusa`. 
+This plugin is compatible with versions >= 2.4.0 of `@medusajs/medusa`.
 
 ## Getting Started
 
-Visit the [Quickstart Guide](https://docs.medusajs.com/learn/installation) to set up a server.
+1.  **Install the plugin:**
+    ```bash
+    yarn add medusa-shiprocket-fulfillment-plugin
+    ```
 
-Visit the [Plugins documentation](https://docs.medusajs.com/learn/fundamentals/plugins) to learn more about plugins and how to create them.
+2.  **Configure the plugin:**
+    In your `medusa-config.js`, add the following to your `modules` object:
+    ```javascript
+    modules: [
+      {
+        resolve: "@medusajs/medusa/fulfillment",
+        options: {
+          providers: [
+            {
+              resolve: "medusa-shiprocket-fulfillment-plugin/providers/shiprocket",
+              id: "shiprocket-fulfillment",
+              options: {
+                email: process.env.SHIPROCKET_EMAIL,
+                password: process.env.SHIPROCKET_PASSWORD,
+                pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION, // optional
+              },
+            },
+          ],
+        },
+      },
+    ]
 
-Visit the [Docs](https://docs.medusajs.com/learn/installation#get-started) to learn more about our system requirements.
+3.  **Add the following to your `.env` file:**
+    ```
+    SHIPROCKET_EMAIL=<your-shiprocket-email>
+    SHIPROCKET_PASSWORD=<your-shiprocket-password>
+    SHIPROCKET_COD=<true-or-false>
+    SHIPROCKET_ALLOWED_COURIER_IDS=<comma-separated-courier-ids>
+    SHIPROCKET_PICKUP_LOCATION=<your-pickup-location>
+    ```
 
 ## What is Medusa
 
