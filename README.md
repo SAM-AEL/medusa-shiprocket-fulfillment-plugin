@@ -37,6 +37,7 @@ Streamline your shipping operations by automating rate calculations, order creat
 | Feature | Description |
 | :--- | :--- |
 | **💵 Automated Rates** | Fetch real-time shipping rates at checkout based on pickup and delivery pin codes. |
+| **🚚 Delivery Estimates** | **[NEW]** Public API to check estimated delivery dates and fastest courier for any pincode. |
 | **📦 Seamless Fulfillment** | Automatically create shipments in Shiprocket when you fulfill an order in Medusa. |
 | **📄 Document Generation** | Generate and retrieve **Shipping Labels**, **Manifests**, and **Invoices** directly. |
 | **↩️ Returns Management** | Handle return requests and generate reverse pickup shipments effortlessly. |
@@ -80,11 +81,15 @@ SHIPROCKET_PICKUP_LOCATION="Primary"
 
 ### 2. Medusa Config
 
-Register the plugin in your `medusa-config.js` (or `medusa-config.ts`) file. You need to add it to both the `modules` (for the fulfillment provider) and `plugins` (if you are using any admin widgets, though currently optional).
+For the plugin to work correctly, you must register it in **TWO places** in `medusa-config.ts`:
+1.  In `modules`: To enable the fulfillment provider.
+2.  In `plugins`: To enable the API routes (like delivery estimates).
 
-```javascript
+```typescript
 module.exports = defineConfig({
   // ... other config
+  
+  // 1. Register as a Fulfillment Module
   modules: [
     {
       resolve: "@medusajs/medusa/fulfillment",
@@ -108,6 +113,14 @@ module.exports = defineConfig({
       },
     },
   ],
+
+  // 2. Register in Plugins array (REQUIRED for API routes)
+  plugins: [
+    {
+      resolve: "medusa-shiprocket-fulfillment-plugin",
+      options: {},
+    },
+  ],
 });
 ```
 
@@ -120,7 +133,9 @@ Check serviceability and get estimated delivery dates for any pincode without cr
 **Endpoint:** `GET /store/shiprocket/delivery-estimate`
 
 > [!NOTE]
-> This endpoint is public — no API key required. Rate limited to **30 requests/min per IP**. Results are cached for **10 minutes**.
+> This endpoint is public — no API key required. 
+> *   **Rate Limit:** 30 requests/min per IP.
+> *   **Caching:** Results cached for 10 minutes.
 
 **Query Parameters:**
 | Parameter | Required | Description |
@@ -147,7 +162,13 @@ curl "https://your-store.com/store/shiprocket/delivery-estimate?delivery_pincode
     "rate": 45,
     "is_surface": true
   },
-  "all_options": [...]
+  "all_options": [
+    {
+      "courier_name": "Delhivery Surface",
+      // ... details
+    },
+    // ... other couriers
+  ]
 }
 ```
 
