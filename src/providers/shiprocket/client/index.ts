@@ -9,6 +9,10 @@ import type {
     ShiprocketCalculateRateResponse,
     ShiprocketCreateOrderResponse,
     ShiprocketTrackingResponse,
+    ShiprocketDeliveryEstimateRequest,
+    ShiprocketDeliveryEstimateResponse,
+    ShiprocketPickupLocation,
+    ShiprocketPickupLocationsResponse,
 } from "./types"
 
 const DEFAULT_TIMEOUT = 15000 // 15 seconds
@@ -82,6 +86,42 @@ export default class ShiprocketClient {
     }
 
     /**
+     * Get all pickup locations with their pincodes
+     * @param locationName Optional - filter by location name/nickname
+     */
+    async getPickupLocations(locationName?: string): Promise<ShiprocketPickupLocation[]> {
+        await this.ensureToken()
+
+        try {
+            const response = await this.axios.get<ShiprocketPickupLocationsResponse>(
+                "/settings/company/pickup"
+            )
+
+            const locations = response.data.data.shipping_address || []
+
+            // Filter by location name if provided
+            if (locationName) {
+                return locations.filter(
+                    (loc) => loc.pickup_location.toLowerCase() === locationName.toLowerCase()
+                )
+            }
+
+            return locations
+        } catch (error: any) {
+            handleError(error, { operation: "getPickupLocations" })
+            return []
+        }
+    }
+
+    /**
+     * Get pincode for a pickup location by name
+     */
+    async getPickupPincode(locationName: string): Promise<string | null> {
+        const locations = await this.getPickupLocations(locationName)
+        return locations[0]?.pin_code || null
+    }
+
+    /**
      * Calculate shipping rate for a route
      */
     async calculate(data: ShiprocketCalculateRateRequest): Promise<number> {
@@ -122,6 +162,74 @@ export default class ShiprocketClient {
         } catch (error: any) {
             if (error instanceof MedusaError) throw error
             handleError(error, { operation: "calculate" })
+        }
+    }
+
+    /**
+     * Get delivery estimate for a route - returns fastest delivery date
+     */
+    async getDeliveryEstimate(data: ShiprocketDeliveryEstimateRequest): Promise<ShiprocketDeliveryEstimateResponse> {
+        await this.ensureToken()
+
+        try {
+            const response = await this.axios.get<ShiprocketCalculateRateResponse>(
+                "/courier/serviceability/",
+                {
+                    params: {
+                        pickup_postcode: data.pickup_postcode,
+                        delivery_postcode: data.delivery_postcode,
+                        weight: data.weight || 0.5,
+                        cod: data.cod || 0,
+                    }
+                }
+            )
+
+            const availableCouriers = response.data.data.available_courier_companies
+
+            if (!availableCouriers?.length) {
+                return {
+                    serviceable: false,
+                    fastest_delivery: null,
+                    all_options: [],
+                }
+            }
+
+            // Calculate estimated delivery date based on days
+            const today = new Date()
+            const calculateDeliveryDate = (days: number): string => {
+                const deliveryDate = new Date(today)
+                deliveryDate.setDate(deliveryDate.getDate() + days)
+                return deliveryDate.toISOString().split("T")[0]
+            }
+
+            // Map and sort by delivery days (fastest first)
+            const allOptions = availableCouriers
+                .map((courier) => ({
+                    courier_name: courier.courier_name,
+                    courier_company_id: courier.id,
+                    estimated_days: parseInt(courier.days) || 0,
+                    estimated_delivery_date: calculateDeliveryDate(parseInt(courier.days) || 0),
+                    rate: Math.ceil(Number(courier.rate) || 0),
+                    is_surface: courier.is_surface,
+                }))
+                .sort((a, b) => a.estimated_days - b.estimated_days)
+
+            return {
+                serviceable: true,
+                fastest_delivery: allOptions[0] || null,
+                all_options: allOptions,
+            }
+        } catch (error: any) {
+            if (error instanceof MedusaError) throw error
+            // Return not serviceable for 404 errors
+            if (error?.response?.status === 404) {
+                return {
+                    serviceable: false,
+                    fastest_delivery: null,
+                    all_options: [],
+                }
+            }
+            handleError(error, { operation: "getDeliveryEstimate" })
         }
     }
 

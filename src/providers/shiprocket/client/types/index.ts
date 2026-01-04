@@ -70,4 +70,51 @@ export interface ShiprocketTrackingResponse {
     }
 }
 
+export interface ShiprocketDeliveryEstimateRequest {
+    pickup_postcode: string
+    delivery_postcode: string
+    weight?: number
+    cod?: number
+}
+
+export interface ShiprocketDeliveryEstimate {
+    courier_name: string
+    courier_company_id: number
+    estimated_days: number
+    estimated_delivery_date: string
+    rate: number
+    is_surface: boolean
+}
+
+export interface ShiprocketDeliveryEstimateResponse {
+    serviceable: boolean
+    fastest_delivery: ShiprocketDeliveryEstimate | null
+    all_options: ShiprocketDeliveryEstimate[]
+}
+
+export interface ShiprocketPickupLocation {
+    id: number
+    pickup_location: string  // The location name/nickname
+    name: string
+    email: string
+    phone: string
+    address: string
+    address_2?: string
+    city: string
+    state: string
+    country: string
+    pin_code: string
+    lat?: string
+    long?: string
+    status: number
+    rto_address_id?: number
+    new: number
+}
+
+export interface ShiprocketPickupLocationsResponse {
+    data: {
+        shipping_address: ShiprocketPickupLocation[]
+    }
+}
+
 export type { AxiosError }

@@ -74,6 +74,7 @@ Add your Shiprocket credentials to your `.env` file.
 SHIPROCKET_EMAIL="your_email@example.com"
 SHIPROCKET_PASSWORD="your_shiprocket_password"
 # Must match the 'Nickname' of a pickup location in your Shiprocket settings
+# This is also used to auto-fetch the pickup pincode for the delivery estimate API
 SHIPROCKET_PICKUP_LOCATION="Primary"
 ```
 
@@ -109,6 +110,56 @@ module.exports = defineConfig({
   ],
 });
 ```
+
+## 🌐 API Endpoints
+
+### Delivery Estimate API
+
+Check serviceability and get estimated delivery dates for any pincode without creating an order.
+
+**Endpoint:** `GET /store/shiprocket/delivery-estimate`
+
+> [!NOTE]
+> This endpoint is public — no API key required. Rate limited to **30 requests/min per IP**. Results are cached for **10 minutes**.
+
+**Query Parameters:**
+| Parameter | Required | Description |
+| :--- | :--- | :--- |
+| `delivery_pincode` | ✅ Yes | The destination pincode (6 digits) |
+| `pickup_pincode` | ❌ No | Pickup location pincode. If not provided, auto-fetched from `SHIPROCKET_PICKUP_LOCATION` |
+| `weight` | ❌ No | Package weight in kg (defaults to 0.5) |
+| `cod` | ❌ No | Cash on delivery: 0 or 1 (defaults to 0) |
+
+**Example Request:**
+```bash
+curl "https://your-store.com/store/shiprocket/delivery-estimate?delivery_pincode=110001"
+```
+
+**Example Response:**
+```json
+{
+  "serviceable": true,
+  "fastest_delivery": {
+    "courier_name": "Delhivery Surface",
+    "courier_company_id": 21,
+    "estimated_days": 2,
+    "estimated_delivery_date": "2025-01-06",
+    "rate": 45,
+    "is_surface": true
+  },
+  "all_options": [...]
+}
+```
+
+**Response Headers:**
+| Header | Description |
+| :--- | :--- |
+| `X-RateLimit-Limit` | Max requests per minute (30) |
+| `X-RateLimit-Remaining` | Requests remaining |
+| `X-Cache` | `HIT` if cached, `MISS` if fresh |
+
+> [!TIP]
+> Set `SHIPROCKET_PICKUP_LOCATION` in your `.env` to auto-fetch the pickup pincode from your Shiprocket account. No need to pass `pickup_pincode` in every request!
 
 ## 💻 Usage Guide
 
