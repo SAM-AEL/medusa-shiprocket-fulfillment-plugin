@@ -22,6 +22,7 @@ type Options = {
     password: string;
     pickup_location?: string;
     cod?: 0 | 1 | "true" | "false";
+    timeout?: number;
 };
 
 class ShipRocketFulfillmentProviderService extends AbstractFulfillmentProviderService {
@@ -32,9 +33,25 @@ class ShipRocketFulfillmentProviderService extends AbstractFulfillmentProviderSe
     protected client: ShiprocketClient;
 
     /**
+     * Validates the plugin options at startup.
+     * @param options - The plugin configuration options
+     * @throws Error if required options are missing
+     */
+    static validateOptions(options: Record<string, unknown>): void {
+        if (!options.email || typeof options.email !== "string") {
+            throw new Error("Shiprocket plugin requires 'email' option (API user email)");
+        }
+        if (!options.password || typeof options.password !== "string") {
+            throw new Error("Shiprocket plugin requires 'password' option (API user password)");
+        }
+        // Validate pickup_location if provided
+        if (options.pickup_location && typeof options.pickup_location !== "string") {
+            throw new Error("Shiprocket 'pickup_location' option must be a string");
+        }
+    }
+
+    /**
      * Constructs a new instance of the ShipRocketFulfillmentProviderService.
-     * @param {Logger} logger - The logger instance.
-     * @param {Options} options - The options for the Shiprocket client.
      */
     constructor({ logger }: InjectedDependencies, options: Options) {
         super();
@@ -44,86 +61,86 @@ class ShipRocketFulfillmentProviderService extends AbstractFulfillmentProviderSe
             email: options.email,
             password: options.password,
             pickup_location: options.pickup_location,
+            timeout: options.timeout,
         });
+
+        this.logger_.info("Shiprocket fulfillment provider initialized");
     }
 
     /**
      * Returns the fulfillment options for Shiprocket.
-     * @returns An array of fulfillment options.
      */
     async getFulfillmentOptions(): Promise<FulfillmentOption[]> {
         return [
             {
-                id: "Standard Shipping",
+                id: "shiprocket-standard",
                 name: "Standard Shipping",
                 is_return: false,
             },
             {
-                id: "Return Shipping",
+                id: "shiprocket-return",
                 name: "Return Shipping",
                 is_return: true,
             },
         ];
     }
 
-
     /**
      * Determines whether the fulfillment option can calculate the shipping rate.
-     * @param data - The fulfillment option data.
-     * @returns A promise that resolves to a boolean indicating whether the option can calculate the rate.
      */
-    async canCalculate(data: CreateShippingOptionDTO): Promise<boolean> {
+    async canCalculate(_data: CreateShippingOptionDTO): Promise<boolean> {
         return true;
     }
+
     /**
      * Calculates the shipping rate for a given order.
-     * @param optionData - The fulfillment option data.
-     * @param data - The fulfillment data.
-     * @param context - The fulfillment context.
-     * @returns The calculated shipping rate.
-     * @throws {Error} If either pickup or delivery postcodes are missing.
-     * @throws {Error} If weight is missing.
      */
-
     async calculatePrice(
-        optionData: CalculateShippingOptionPriceDTO["optionData"],
-        data: CalculateShippingOptionPriceDTO["data"],
+        _optionData: CalculateShippingOptionPriceDTO["optionData"],
+        _data: CalculateShippingOptionPriceDTO["data"],
         context: CalculateShippingOptionPriceDTO["context"]
     ): Promise<CalculatedShippingOptionPrice> {
-        const params = {
-            pickup_postcode: context["from_location"]?.address?.postal_code as string,
-            delivery_postcode: context["shipping_address"]?.postal_code as string,
-            weight: 0,
-            cod: (this.options_.cod === "true" || this.options_.cod === 1) ? 1 : 0 as number,
-        };
+        const pickupPostcode = context["from_location"]?.address?.postal_code as string;
+        const deliveryPostcode = context["shipping_address"]?.postal_code as string;
 
-        // Calculate total weight
+        if (!pickupPostcode) {
+            this.logger_.warn(
+                "Shiprocket: Missing pickup postcode. Ensure a Stock Location with an address is linked to the Sales Channel."
+            );
+        }
+
+        if (!pickupPostcode || !deliveryPostcode) {
+            throw new MedusaError(
+                MedusaError.Types.INVALID_DATA,
+                "Both pickup and delivery postcodes are required for rate calculation"
+            );
+        }
+
+        // Calculate total weight from items
         const items = (context["items"] || []) as any[];
         let totalWeightGrams = 0;
 
         for (const item of items) {
             const quantity = item.quantity || 1;
-            // Medusa usually stores weight in grams. Shiprocket needs kg.
-            // Try variant weight first, then metadata, then default to 0
-            const itemWeight = (item.variant?.weight ?? item.metadata?.weight ?? 0);
+            const itemWeight = item.variant?.weight ?? item.metadata?.weight ?? 0;
             totalWeightGrams += itemWeight * quantity;
         }
 
-        // Convert to kg. If 0, default to 0.5kg to allow calculation to proceed (avoid blocking checkout for missing weights)
-        params.weight = totalWeightGrams > 0 ? totalWeightGrams / 1000 : 0.5;
+        // Convert to kg, default to 0.5kg if no weight set
+        const weightKg = totalWeightGrams > 0 ? totalWeightGrams / 1000 : 0.5;
 
-        // Ensure we have a valid pickup postcode. 
-        // Note: from_location depends on Stock Location being properly configured and linked in Medusa.
-        if (!params.pickup_postcode) {
-            this.logger_.warn("Shiprocket: Missing pickup_postcode. Ensure a Stock Location with an address is linked to the Sales Channel.");
-            // We can't proceed without it, shiprocket API will fail.
-        }
+        const params = {
+            pickup_postcode: pickupPostcode,
+            delivery_postcode: deliveryPostcode,
+            weight: weightKg,
+            cod: (this.options_.cod === "true" || this.options_.cod === 1) ? 1 : 0 as number,
+        };
 
-        if (!params.pickup_postcode || !params.delivery_postcode) {
-            throw new Error("Both pickup and delivery postcodes are required for rate calculation.");
-        }
+        this.logger_.debug(`Shiprocket: Calculating rate for ${pickupPostcode} -> ${deliveryPostcode}, weight: ${weightKg}kg`);
 
         const price = await this.client.calculate(params);
+
+        this.logger_.debug(`Shiprocket: Calculated rate: ${price}`);
 
         return {
             calculated_amount: price,
@@ -131,14 +148,8 @@ class ShipRocketFulfillmentProviderService extends AbstractFulfillmentProviderSe
         };
     }
 
-
     /**
      * Creates a fulfillment in Shiprocket.
-     * @param data - The fulfillment data.
-     * @param items - The items in the fulfillment.
-     * @param order - The order associated with the fulfillment.
-     * @param fulfillment - The fulfillment data.
-     * @returns The created fulfillment data.
      */
     async createFulfillment(
         data: Record<string, unknown>,
@@ -146,8 +157,17 @@ class ShipRocketFulfillmentProviderService extends AbstractFulfillmentProviderSe
         order: Partial<FulfillmentOrderDTO> | undefined,
         fulfillment: Partial<Omit<FulfillmentDTO, "provider_id">>
     ): Promise<CreateFulfillmentResult> {
+        const orderId = order?.id || "unknown";
+        this.logger_.info(`Shiprocket: Creating fulfillment for order ${orderId}`);
+
         try {
             const externalData = await this.client.create(fulfillment, items, order);
+
+            this.logger_.info(
+                `Shiprocket: Fulfillment created - Order ID: ${externalData.order_id}, ` +
+                `Shipment ID: ${externalData.shipment_id}, AWB: ${externalData.awb}`
+            );
+
             const { label, manifest, invoice } = await this.client.createDocuments(externalData);
 
             return {
@@ -160,45 +180,49 @@ class ShipRocketFulfillmentProviderService extends AbstractFulfillmentProviderSe
                         tracking_number: externalData.tracking_number || "",
                         tracking_url: externalData.tracking_url || "",
                         label_url: label || "",
-                        // invoice_url: invoice || "", // types might not support this in label object, but okay to omit if not needed
                     },
                 ],
             };
         } catch (err: any) {
+            this.logger_.error(`Shiprocket: Failed to create fulfillment for order ${orderId}: ${err.message}`);
             throw new MedusaError(
                 MedusaError.Types.INVALID_DATA,
-                (err?.message || err?.response?.data?.message || "Failed to create fulfillment")
+                err?.message || "Failed to create fulfillment"
             );
         }
     }
 
     /**
      * Cancels a fulfillment in Shiprocket.
-     * @param data - The fulfillment data.
-     * @throws {MedusaError} If the order ID is not provided.
      */
-    async cancelFulfillment(data: Record<string, unknown>): Promise<any> {
-        const { order_id } = data as { order_id: string };
+    async cancelFulfillment(data: Record<string, unknown>): Promise<void> {
+        const orderId = data.order_id as string;
 
-        if (!order_id) {
+        if (!orderId) {
             throw new MedusaError(
                 MedusaError.Types.INVALID_DATA,
-                "Order ID is required"
+                "Shiprocket order_id is required to cancel fulfillment"
             );
         }
 
-        await this.client.cancel(order_id);
+        this.logger_.info(`Shiprocket: Cancelling fulfillment for order ${orderId}`);
+
+        await this.client.cancel(orderId);
+
+        this.logger_.info(`Shiprocket: Fulfillment cancelled for order ${orderId}`);
     }
 
     /**
      * Creates a return fulfillment in Shiprocket.
-     * @param fulfillment - The fulfillment data.
-     * @returns The created return fulfillment data.
      */
     async createReturnFulfillment(
         fulfillment: Record<string, unknown>
     ): Promise<CreateFulfillmentResult> {
+        this.logger_.info(`Shiprocket: Creating return fulfillment`);
+
         const externalData = await this.client.createReturn(fulfillment);
+
+        this.logger_.info(`Shiprocket: Return fulfillment created - AWB: ${externalData.awb || externalData.tracking_number}`);
 
         return {
             data: {
@@ -216,76 +240,57 @@ class ShipRocketFulfillmentProviderService extends AbstractFulfillmentProviderSe
     }
 
     /**
-    * Retrieves the documents associated with a fulfillment.
-    * @param data - The fulfillment data.
-    * @returns An array of documents associated with the fulfillment.
-    */
-    async getFulfillmentDocuments(data: Record<string, unknown>): Promise<never[]> {
-        const invoice = await this.client.generateInvoice(data);
-        return invoice || [];
+     * Retrieves the documents associated with a fulfillment.
+     */
+    async getFulfillmentDocuments(_data: Record<string, unknown>): Promise<never[]> {
+        // Shiprocket documents are fetched during fulfillment creation
+        return [];
     }
 
     /**
      * Retrieves the documents associated with a shipment.
-     * @param data - The shipment data.
-     * @returns An array of documents associated with the shipment.
      */
-    async getShipmentDocuments(data: any): Promise<never[]> {
-        const label = await this.client.generateLabel(data);
-        return label || [];
+    async getShipmentDocuments(_data: any): Promise<never[]> {
+        // Shiprocket documents are fetched during fulfillment creation
+        return [];
     }
 
     /**
      * Retrieves the documents associated with a return fulfillment.
-     * @param data - The return fulfillment data.
-     * @returns An empty array, as document retrieval is not supported for returns.
      */
-    async getReturnDocuments(data: Record<string, unknown>): Promise<never[]> {
+    async getReturnDocuments(_data: Record<string, unknown>): Promise<never[]> {
         return [];
     }
 
-
     /**
-     * Retrieves the documents associated with a fulfillment, given its data and the type of documents to retrieve.
-     * @param fulfillmentData - The fulfillment data.
-     * @param documentType - The type of documents to retrieve.
-     * @returns A promise that resolves once the documents have been retrieved.
-     * @remarks Document retrieval is not supported by this provider.
+     * Retrieves the documents associated with a fulfillment by type.
      */
     async retrieveDocuments(
-        fulfillmentData: Record<string, unknown>,
-        documentType: string
+        _fulfillmentData: Record<string, unknown>,
+        _documentType: string
     ): Promise<void> {
-        this.logger_.debug("Document retrieval not supported");
+        this.logger_.debug("Shiprocket: Document retrieval by type not supported");
     }
 
     /**
-     * Validates the fulfillment data to ensure it has the required information.
-     * If the external ID is not present, it will be generated automatically.
-     * @param optionData - The data provided by the user when creating a fulfillment option.
-     * @param data - The data provided by the user when creating a fulfillment.
-     * @param context - The context of the fulfillment.
-     * @returns A promise that resolves with the validated fulfillment data.
+     * Validates the fulfillment data.
      */
     async validateFulfillmentData(
-        optionData: Record<string, unknown>,
+        _optionData: Record<string, unknown>,
         data: Record<string, unknown>,
-        context: Record<string, unknown>
+        _context: Record<string, unknown>
     ): Promise<Record<string, unknown>> {
         return {
             ...data,
-            external_id: `temp_${Date.now()}`,
+            external_id: `shiprocket_${Date.now()}`,
         };
     }
 
     /**
-     * Validates a fulfillment option to ensure it has the required information.
-     * @param data - The data provided by the user when creating a fulfillment option.
-     * @returns A promise that resolves with a boolean indicating whether the option is valid.
-     * @remarks A fulfillment option is valid if it has an external ID.
+     * Validates a fulfillment option.
      */
     async validateOption(data: Record<string, unknown>): Promise<boolean> {
-        return data.external_id !== undefined;
+        return data.id === "shiprocket-standard" || data.id === "shiprocket-return" || data.external_id !== undefined;
     }
 }
 

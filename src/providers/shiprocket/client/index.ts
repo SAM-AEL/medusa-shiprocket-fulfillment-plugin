@@ -11,6 +11,8 @@ import type {
     ShiprocketTrackingResponse,
 } from "./types"
 
+const DEFAULT_TIMEOUT = 15000 // 15 seconds
+
 export default class ShiprocketClient {
     private email: string
     private password: string
@@ -26,16 +28,18 @@ export default class ShiprocketClient {
                 "Shiprocket API credentials are required"
             )
         }
+
         this.email = options.email
         this.password = options.password
         this.pickup_location = options.pickup_location
+
         this.axios = axios.create({
             baseURL: "https://apiv2.shiprocket.in/v1/external",
             headers: { "Content-Type": "application/json" },
-            timeout: 10000,
+            timeout: options.timeout || DEFAULT_TIMEOUT,
         })
 
-        // Interceptor to handle 401 Unauthorized automatically
+        // Interceptor to handle 401 Unauthorized - auto-refresh token
         this.axios.interceptors.response.use(
             (response) => response,
             async (error) => {
@@ -77,6 +81,9 @@ export default class ShiprocketClient {
         }
     }
 
+    /**
+     * Calculate shipping rate for a route
+     */
     async calculate(data: ShiprocketCalculateRateRequest): Promise<number> {
         await this.ensureToken()
 
@@ -90,10 +97,11 @@ export default class ShiprocketClient {
             if (!availableCouriers?.length) {
                 throw new MedusaError(
                     MedusaError.Types.NOT_FOUND,
-                    "No couriers available for this route"
+                    `No couriers available for route ${data.pickup_postcode} -> ${data.delivery_postcode}`
                 )
             }
 
+            // Filter by allowed courier IDs if specified
             const filtered = data.allowed_courier_ids?.length
                 ? availableCouriers.filter((c) => data.allowed_courier_ids!.includes(c.id))
                 : availableCouriers
@@ -105,20 +113,21 @@ export default class ShiprocketClient {
                 )
             }
 
+            // Return cheapest rate
             const cheapest = filtered.reduce((min, curr) =>
                 Number(curr.rate) < Number(min.rate) ? curr : min
             )
 
             return Math.ceil(Number(cheapest?.rate) || 0)
-        } catch (error) {
-            handleError(error)
-            throw new MedusaError(
-                MedusaError.Types.UNEXPECTED_STATE,
-                "Rate calculation failed unexpectedly"
-            )
+        } catch (error: any) {
+            if (error instanceof MedusaError) throw error
+            handleError(error, { operation: "calculate" })
         }
     }
 
+    /**
+     * Create an order in Shiprocket and assign AWB
+     */
     async create(
         fulfillment: any,
         items: any[],
@@ -126,16 +135,20 @@ export default class ShiprocketClient {
     ): Promise<ShiprocketCreateOrderResponse> {
         await this.ensureToken()
 
-        const req = (val: any, name: string) => {
+        const require = (val: any, name: string) => {
             if (val === undefined || val === null || val === "") {
-                throw new MedusaError(MedusaError.Types.INVALID_DATA, `Missing required field: ${name}`)
+                throw new MedusaError(
+                    MedusaError.Types.INVALID_DATA,
+                    `Missing required field: ${name}`
+                )
             }
             return val
         }
 
+        // Map order items by ID for quick lookup
         const orderItemMap = new Map()
         if (Array.isArray(order.items)) {
-            order.items.forEach((orderItem) => {
+            order.items.forEach((orderItem: any) => {
                 orderItemMap.set(orderItem.id, orderItem)
             })
         }
@@ -146,7 +159,8 @@ export default class ShiprocketClient {
         let totalHeight = 0
 
         try {
-            const order_date = new Date(order.created_at)
+            // Format date as DD-MM-YYYY HH:mm
+            const orderDate = new Date(order.created_at)
                 .toLocaleString("en-GB", {
                     day: "2-digit", month: "2-digit", year: "numeric",
                     hour: "2-digit", minute: "2-digit", hour12: false,
@@ -155,7 +169,7 @@ export default class ShiprocketClient {
                 .replace(/\//g, "-")
 
             // Calculate totals and dimensions
-            items.forEach((item) => {
+            for (const item of items) {
                 const orderItem = orderItemMap.get(item.line_item_id)
                 if (!orderItem) {
                     throw new MedusaError(
@@ -172,7 +186,7 @@ export default class ShiprocketClient {
                     )
                 }
 
-                const weight = Number(variant.weight || 0) / 1000
+                const weight = Number(variant.weight || 0) / 1000 // Convert grams to kg
                 const length = Number(variant.length || 0)
                 const breadth = Number(variant.width || 0)
                 const height = Number(variant.height || 0)
@@ -180,7 +194,7 @@ export default class ShiprocketClient {
                 if (!weight || !length || !breadth || !height) {
                     throw new MedusaError(
                         MedusaError.Types.INVALID_DATA,
-                        `Missing dimensions/weight for item "${item.title}". Please update product variant settings.`
+                        `Missing dimensions/weight for "${item.title}". Update product variant settings.`
                     )
                 }
 
@@ -189,39 +203,39 @@ export default class ShiprocketClient {
                 totalLength = Math.max(totalLength, length)
                 totalBreadth = Math.max(totalBreadth, breadth)
                 totalHeight += height * quantity
-            })
+            }
 
             const shipping = order.shipping_address || fulfillment?.delivery_address || {}
             const billing = order.billing_address || order.customer || {}
 
-            // Build Order Payload with STRICT validation
+            // Build order payload
             const orderData = {
-                order_id: `${order.id}-${Math.floor(Date.now() / 1000)}`, // Safer randomness
-                order_date,
+                order_id: `${order.id}-${Math.floor(Date.now() / 1000)}`,
+                order_date: orderDate,
                 pickup_location: this.pickup_location || "Primary",
 
-                billing_customer_name: req(billing.first_name, "Billing First Name"),
+                billing_customer_name: require(billing.first_name, "Billing First Name"),
                 billing_last_name: billing.last_name || "",
-                billing_address: req(shipping.address_1 || billing.address_1, "Billing Address 1"),
+                billing_address: require(shipping.address_1 || billing.address_1, "Billing Address"),
                 billing_address_2: shipping.address_2 || billing.address_2 || "",
-                billing_city: req(shipping.city || billing.city, "Billing City"),
-                billing_pincode: Number(req(shipping.postal_code || billing.postal_code, "Billing Pincode")),
-                billing_state: req(shipping.province || billing.province, "Billing State"),
-                billing_country: req(shipping.country_code || billing.country_code || "IN", "Billing Country"),
-                billing_email: req(billing.email || order.email, "Billing Email"),
-                billing_phone: Number(req(shipping.phone || billing.phone, "Billing Phone").toString().replace(/[^0-9]/g, "")),
+                billing_city: require(shipping.city || billing.city, "Billing City"),
+                billing_pincode: Number(require(shipping.postal_code || billing.postal_code, "Billing Pincode")),
+                billing_state: require(shipping.province || billing.province, "Billing State"),
+                billing_country: require(shipping.country_code || billing.country_code || "IN", "Billing Country"),
+                billing_email: require(billing.email || order.email, "Billing Email"),
+                billing_phone: Number(require(shipping.phone || billing.phone, "Billing Phone").toString().replace(/[^0-9]/g, "")),
 
                 shipping_is_billing: true,
-                shipping_customer_name: req(shipping.first_name, "Shipping First Name"),
+                shipping_customer_name: require(shipping.first_name, "Shipping First Name"),
                 shipping_last_name: shipping.last_name || "",
-                shipping_address: req(shipping.address_1, "Shipping Address 1"),
+                shipping_address: require(shipping.address_1, "Shipping Address"),
                 shipping_address_2: shipping.address_2 || "",
-                shipping_city: req(shipping.city, "Shipping City"),
-                shipping_pincode: Number(req(shipping.postal_code, "Shipping Pincode")),
-                shipping_country: req(shipping.country_code || "IN", "Shipping Country"),
-                shipping_state: req(shipping.province, "Shipping State"),
-                shipping_email: req(billing.email || order.email, "Shipping Email"),
-                shipping_phone: Number(req(shipping.phone, "Shipping Phone").toString().replace(/[^0-9]/g, "")),
+                shipping_city: require(shipping.city, "Shipping City"),
+                shipping_pincode: Number(require(shipping.postal_code, "Shipping Pincode")),
+                shipping_country: require(shipping.country_code || "IN", "Shipping Country"),
+                shipping_state: require(shipping.province, "Shipping State"),
+                shipping_email: require(billing.email || order.email, "Shipping Email"),
+                shipping_phone: Number(require(shipping.phone, "Shipping Phone").toString().replace(/[^0-9]/g, "")),
 
                 order_items: items.map((item) => {
                     const orderItem = orderItemMap.get(item.line_item_id)!
@@ -252,33 +266,37 @@ export default class ShiprocketClient {
                 weight: totalWeight,
             }
 
+            // Create order
             const orderCreated = await this.axios
                 .post<ShiprocketCreateOrderResponse>("/orders/create/adhoc", orderData)
                 .catch((err) => {
-                    // Extract deep error message if available
-                    const apiError = err as { response?: { data?: { errors?: Record<string, string[]> } } }
-                    const firstError = apiError.response?.data?.errors
-                        ? Object.values(apiError.response.data.errors)[0][0]
-                        : err.message
-                    throw new MedusaError(MedusaError.Types.INVALID_DATA, `Shiprocket Error: ${firstError}`)
+                    const apiError = err?.response?.data?.errors
+                    if (apiError) {
+                        const firstError = Object.values(apiError)[0]
+                        const msg = Array.isArray(firstError) ? firstError[0] : firstError
+                        throw new MedusaError(MedusaError.Types.INVALID_DATA, `Shiprocket: ${msg}`)
+                    }
+                    throw err
                 })
 
             if (!orderCreated.data?.shipment_id) {
-                throw new MedusaError(MedusaError.Types.INVALID_DATA, "Failed to create Shiprocket order: No shipment ID returned")
+                throw new MedusaError(
+                    MedusaError.Types.INVALID_DATA,
+                    "Shiprocket order created but no shipment ID returned"
+                )
             }
 
             // Assign AWB
-            const awbCreated = await this.axios.post(`/courier/assign/awb`, {
-                shipment_id: orderCreated.data.shipment_id,
-            })
+            const awbPayload = { shipment_id: orderCreated.data.shipment_id }
+            const awbCreated = await this.axios.post("/courier/assign/awb", awbPayload)
 
             if (awbCreated.data.awb_assign_status !== 1) {
-                // Try to cancel if AWB fails to avoid stuck orders
-                try { await this.cancel(orderCreated.data.order_id) } catch (e) { /* ignore */ }
+                // Cancel order to avoid stuck state
+                try { await this.cancel(orderCreated.data.order_id) } catch { /* ignore */ }
 
                 throw new MedusaError(
                     MedusaError.Types.NOT_ALLOWED,
-                    awbCreated.data.message || "AWB assignment failed"
+                    awbCreated.data.message || "AWB assignment failed - no courier available"
                 )
             }
 
@@ -293,21 +311,27 @@ export default class ShiprocketClient {
                 tracking_url: `https://shiprocket.co/tracking/${responseData.awb_code}`,
             }
 
-        } catch (error) {
-            handleError(error)
-            throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, "Order creation failed")
+        } catch (error: any) {
+            if (error instanceof MedusaError) throw error
+            handleError(error, { operation: "create", orderId: order?.id })
         }
     }
 
+    /**
+     * Cancel an order in Shiprocket
+     */
     async cancel(orderId: string): Promise<void> {
         await this.ensureToken()
         try {
-            await this.axios.post(`/orders/cancel`, { ids: [orderId] })
+            await this.axios.post("/orders/cancel", { ids: [orderId] })
         } catch (error: any) {
-            handleError(error)
+            handleError(error, { operation: "cancel", orderId })
         }
     }
 
+    /**
+     * Get tracking information for a shipment
+     */
     async getTrackingInfo(trackingNumber: string): Promise<ShiprocketTrackingResponse> {
         await this.ensureToken()
         try {
@@ -315,23 +339,20 @@ export default class ShiprocketClient {
                 `/courier/track/awb/${trackingNumber}`
             )
             return response.data
-        } catch (error) {
-            handleError(error)
-            throw new MedusaError(MedusaError.Types.UNEXPECTED_STATE, "Tracking failed")
+        } catch (error: any) {
+            handleError(error, { operation: "tracking" })
         }
     }
 
+    /**
+     * Create a return order in Shiprocket
+     */
     async createReturn(fulfillment: any): Promise<ShiprocketCreateOrderResponse> {
         await this.ensureToken()
 
-        // Implementation of Return Order
-        // Note: Shiprocket Return API requires specific fields. 
-        // We assume 'fulfillment' contains necessary return details linked to the original order.
-
         const returnData = {
             order_id: `${fulfillment.id}-${Math.floor(Date.now() / 1000)}`,
-            order_date: new Date().toISOString().split('T')[0],
-            cannel_id: "", // Optional
+            order_date: new Date().toISOString().split("T")[0],
             pickup_customer_name: fulfillment.pickup_address?.first_name,
             pickup_last_name: fulfillment.pickup_address?.last_name || "",
             pickup_address: fulfillment.pickup_address?.address_1,
@@ -342,39 +363,48 @@ export default class ShiprocketClient {
             pickup_pincode: fulfillment.pickup_address?.postal_code,
             pickup_email: fulfillment.email,
             pickup_phone: fulfillment.pickup_address?.phone,
-            order_items: fulfillment.items.map((item: any) => ({
+            order_items: fulfillment.items?.map((item: any) => ({
                 name: item.title,
                 sku: item.sku,
                 units: item.quantity,
                 selling_price: item.unit_price,
                 discount: "",
-                qc_enable: false // default false
-            })),
+                qc_enable: false,
+            })) || [],
             payment_method: "Prepaid",
             total_discount: "0",
             sub_total: fulfillment.sub_total || 0,
-            length: 10, breadth: 10, height: 10, weight: 0.5 // defaults if missing on return items
+            length: 10,
+            breadth: 10,
+            height: 10,
+            weight: 0.5,
         }
 
         try {
-            const response = await this.axios.post(`/orders/create/return`, returnData)
+            const response = await this.axios.post("/orders/create/return", returnData)
             return response.data
-        } catch (error) {
-            handleError(error)
-            throw new MedusaError(MedusaError.Types.INVALID_DATA, "Failed to create return order")
+        } catch (error: any) {
+            handleError(error, { operation: "createReturn" })
         }
     }
 
-    async createDocuments(fulfillment: any) {
+    /**
+     * Generate documents (manifest, label, invoice) for a shipment
+     */
+    async createDocuments(fulfillment: any): Promise<{
+        manifest: string
+        label: string
+        invoice: string
+    }> {
         await this.ensureToken()
 
-        const createPromise = (url: string, params: any) =>
-            this.axios.get(url, { params }).catch(() => ({ data: null })) // Return null on fail to not break all
+        const safeGet = (url: string, params: any) =>
+            this.axios.get(url, { params }).catch(() => ({ data: null }))
 
         const [manifestRes, labelRes, invoiceRes] = await Promise.all([
-            createPromise(`/manifests/generate`, { order_ids: [fulfillment.shipment_id] }),
-            createPromise(`/courier/generate/label`, { shipment_id: [fulfillment.shipment_id] }),
-            createPromise(`/orders/print/invoice`, { ids: [fulfillment.order_id] })
+            safeGet("/manifests/generate", { order_ids: [fulfillment.shipment_id] }),
+            safeGet("/courier/generate/label", { shipment_id: [fulfillment.shipment_id] }),
+            safeGet("/orders/print/invoice", { ids: [fulfillment.order_id] }),
         ])
 
         const extractUrl = (res: any, key: string, checkKey?: string, checkVal?: any) => {
@@ -391,19 +421,33 @@ export default class ShiprocketClient {
         }
     }
 
-    async generateLabel(fulfillment: any) {
+    /**
+     * Generate label for a shipment
+     */
+    async generateLabel(fulfillment: any): Promise<string> {
         await this.ensureToken()
-        const res = await this.axios.get(`/courier/generate/label`, {
-            params: { shipment_id: [fulfillment.shipment_id] }
-        })
-        return res.data?.[0]?.label_url || ""
+        try {
+            const res = await this.axios.get("/courier/generate/label", {
+                params: { shipment_id: [fulfillment.shipment_id] },
+            })
+            return res.data?.[0]?.label_url || ""
+        } catch {
+            return ""
+        }
     }
 
-    async generateInvoice(fulfillment: any) {
+    /**
+     * Generate invoice for an order
+     */
+    async generateInvoice(fulfillment: any): Promise<string> {
         await this.ensureToken()
-        const res = await this.axios.get(`/orders/print/invoice`, {
-            params: { ids: [fulfillment.order_id] }
-        })
-        return res.data?.[0]?.invoice_url || ""
+        try {
+            const res = await this.axios.get("/orders/print/invoice", {
+                params: { ids: [fulfillment.order_id] },
+            })
+            return res.data?.[0]?.invoice_url || ""
+        } catch {
+            return ""
+        }
     }
 }

@@ -4,6 +4,7 @@ export interface ShiprocketClientOptions {
     email: string
     password: string
     pickup_location?: string
+    timeout?: number
 }
 
 export interface ShiprocketError {
