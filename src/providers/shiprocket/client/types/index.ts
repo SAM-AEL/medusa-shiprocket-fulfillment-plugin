@@ -58,15 +58,46 @@ export interface ShiprocketCreateOrderResponse {
 
 export interface ShiprocketTrackingResponse {
     tracking_data: {
-        track_status: string
-        shipment_status: string
+        track_status: number | string
+        shipment_status: number | string
         current_status: string
         etd?: string
-        scans: {
+        scans?: {
             date: string
             activity: string
             location: string
         }[]
+        shipment_track?: {
+            id: number
+            awb_code: string
+            courier_name: string
+            pickup_date: string
+            delivered_date: string
+            weight: string
+            origin: string
+            destination: string
+            current_status: string
+            edd?: string
+            pod?: string
+            pod_status?: string
+        }[]
+        shipment_track_activities?: {
+            date: string
+            status: string
+            activity: string
+            location: string
+            "sr-status": string | number
+            "sr-status-label": string
+        }[]
+        courier_name?: string
+        current_status_id?: number
+        shipment_status_id?: number
+        current_timestamp?: string
+        awb_assigned_date?: string
+        pickup_scheduled_date?: string
+        pod_status?: string
+        pod?: string
+        is_return?: boolean
     }
 }
 

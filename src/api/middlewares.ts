@@ -6,7 +6,6 @@ export default defineMiddlewares({
             // Make delivery estimate endpoint public (no API key required)
             matcher: "/store/shiprocket/delivery-estimate",
             middlewares: [],
-            // Disable authentication for this route
             bodyParser: { sizeLimit: "1kb" },
         },
     ],

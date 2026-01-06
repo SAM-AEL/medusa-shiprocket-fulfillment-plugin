@@ -7,7 +7,7 @@
 <h1 align="center">Medusa Shiprocket Fulfillment Plugin</h1>
 
 <p align="center">
-  <strong>Seamless Logistics for Medusa v2 Stores in India 🇮🇳</strong>
+  <strong>Logistics integration for Medusa v2 stores in the Indian market.</strong>
 </p>
 
 <p align="center">
@@ -24,72 +24,57 @@
 
 <hr />
 
-## 🚀 Overview
+## Overview
 
-The **Medusa Shiprocket Fulfillment Plugin** integrates [Shiprocket](https://www.shiprocket.in/), India's leading logistics aggregator, directly into your [Medusa](https://medusajs.com/) store. 
+The **Medusa Shiprocket Fulfillment Plugin** provides a direct integration with [Shiprocket](https://www.shiprocket.in/), allowing Medusa v2 stores to manage shipping operations within India. It automates fulfillment workflows, provides delivery estimates at checkout, and handles post-purchase tracking and documentation.
 
-Streamline your shipping operations by automating rate calculations, order creation, label generation, and returns—all from within the Medusa Admin.
+## Core Features
 
-**Compatible with Medusa v2.0+**
-
-## ✨ Key Features
-
-| Feature | Description |
+| Feature | Functionality |
 | :--- | :--- |
-| **💵 Automated Rates** | Fetch real-time shipping rates at checkout based on pickup and delivery pin codes. |
-| **🚚 Delivery Estimates** | **[NEW]** Public API to check estimated delivery dates and fastest courier for any pincode. |
-| **📦 Seamless Fulfillment** | Automatically create shipments in Shiprocket when you fulfill an order in Medusa. |
-| **📄 Document Generation** | Generate and retrieve **Shipping Labels**, **Manifests**, and **Invoices** directly. |
-| **↩️ Returns Management** | Handle return requests and generate reverse pickup shipments effortlessly. |
-| **🇮🇳 India-First** | Optimized for Indian addresses, GST compliance, and domestic courier networks. |
-| **🛑 Easy Cancellation** | Cancel shipments instantly from the Medusa Admin to void labels. |
+| **Real-time Rates** | Support for dynamic shipping rate calculation at checkout based on destination pincode and weight. |
+| **Delivery Estimates** | Public API for surfacing estimated delivery dates and fastest courier options on the storefront. |
+| **Automated Shipments** | Automated order creation in Shiprocket and AWB assignment during Medusa fulfillment. |
+| **Document Management** | One-click generation and retrieval of Shipping Labels, Manifests, and Invoices. |
+| **Admin Tracking** | Integrated dashboard widget for real-time shipment status, scan history, and manual synchronization. |
+| **Webhook Support** | Native listener for Shiprocket status updates to keep the database and customer informed. |
+| **Returns & Cancellations** | Support for creating return shipments and cancelling existing orders directly from Medusa. |
 
-## 📋 Prerequisites
+## Prerequisites
 
-Before you begin, ensure you have:
+- **Medusa v2** installed and configured.
+- A registered **Shiprocket Account**.
+- Configured **Pickup Locations** in the Shiprocket dashboard.
 
-1.  A **[Medusa v2](https://docs.medusajs.com/)** server set up.
-2.  A **[Shiprocket](https://app.shiprocket.in/register)** account.
-3.  At least one **Pickup Location** configured in your Shiprocket dashboard.
+## Installation
 
-## 🛠️ Installation
-
-Install the plugin using your preferred package manager:
+Install the package via yarn or npm:
 
 ```bash
-npm install medusa-shiprocket-fulfillment-plugin
-# or
 yarn add medusa-shiprocket-fulfillment-plugin
+# or
+npm install medusa-shiprocket-fulfillment-plugin
 ```
 
-## ⚙️ Configuration
+## Configuration
 
 ### 1. Environment Variables
 
-Add your Shiprocket credentials to your `.env` file. 
-
-> [!WARNING]
-> **Security Note**: Never commit your actual API passwords to version control (git).
+Store your credentials and configuration in your `.env` file:
 
 ```bash
 SHIPROCKET_EMAIL="your_email@example.com"
 SHIPROCKET_PASSWORD="your_shiprocket_password"
-# Must match the 'Nickname' of a pickup location in your Shiprocket settings
-# This is also used to auto-fetch the pickup pincode for the delivery estimate API
-SHIPROCKET_PICKUP_LOCATION="Primary"
+SHIPROCKET_PICKUP_LOCATION="Primary" # Nickname of the pickup location in Shiprocket
+SHIPROCKET_WEBHOOK_TOKEN="secure-token" # Used to authenticate incoming status updates
 ```
 
 ### 2. Medusa Config
 
-For the plugin to work correctly, you must register it in **TWO places** in `medusa-config.ts`:
-1.  In `modules`: To enable the fulfillment provider.
-2.  In `plugins`: To enable the API routes (like delivery estimates).
+The plugin requires registration as both a fulfillment module and a standard plugin in `medusa-config.ts`:
 
 ```typescript
 module.exports = defineConfig({
-  // ... other config
-  
-  // 1. Register as a Fulfillment Module
   modules: [
     {
       resolve: "@medusajs/medusa/fulfillment",
@@ -102,19 +87,13 @@ module.exports = defineConfig({
               email: process.env.SHIPROCKET_EMAIL,
               password: process.env.SHIPROCKET_PASSWORD,
               pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION,
-              /**
-               * Set "true" (string) to enable Cash on Delivery support.
-               * This maps the payment method 'cod' to Shiprocket's COD logic.
-               */
-              cod: "false", 
+              cod: "false", // Enable string "true" for COD support
             },
           },
         ],
       },
     },
   ],
-
-  // 2. Register in Plugins array (REQUIRED for API routes)
   plugins: [
     {
       resolve: "medusa-shiprocket-fulfillment-plugin",
@@ -124,110 +103,35 @@ module.exports = defineConfig({
 });
 ```
 
-## 🌐 API Endpoints
+## Admin Experience
 
-### Delivery Estimate API
+The plugin includes a redesigned **Shipment & Tracking** widget that appears on order detail pages.
 
-Check serviceability and get estimated delivery dates for any pincode without creating an order.
+### Real-time Synchronization
+The widget provides a **Sync Status** button that allows admins to manually refresh tracking data from Shiprocket. This action also regenerates and updates shipping documents if they were previously unavailable.
 
-**Endpoint:** `GET /store/shiprocket/delivery-estimate`
+### Document Management
+A unified 3-column quick-action grid provides immediate access to:
+- **Shipping Label**: Direct download for the assigned courier label.
+- **Invoice**: Access to the Shiprocket-generated order invoice.
+- **Manifest**: Retrieval of the carrier manifest for pickup.
 
-> [!NOTE]
-> This endpoint is public — no API key required. 
-> *   **Rate Limit:** 30 requests/min per IP.
-> *   **Caching:** Results cached for 10 minutes.
+### Tracking Timeline
+A detailed, interactive timeline displays the full lifecycle of a shipment, mapping Shiprocket's internal status codes to human-readable activities with timestamped location updates.
 
-**Query Parameters:**
-| Parameter | Required | Description |
-| :--- | :--- | :--- |
-| `delivery_pincode` | ✅ Yes | The destination pincode (6 digits) |
-| `pickup_pincode` | ❌ No | Pickup location pincode. If not provided, auto-fetched from `SHIPROCKET_PICKUP_LOCATION` |
-| `weight` | ❌ No | Package weight in kg (defaults to 0.5) |
-| `cod` | ❌ No | Cash on delivery: 0 or 1 (defaults to 0) |
+## API Reference
 
-**Example Request:**
-```bash
-curl "https://your-store.com/store/shiprocket/delivery-estimate?delivery_pincode=110001"
-```
+### Delivery Estimates (`/store/shiprocket/delivery-estimate`)
+A public endpoint used during the checkout process to show serviceability and estimated delivery times.
+- **Query Params**: `delivery_pincode`, `pickup_pincode` (optional), `weight`, `cod`.
+- **Response**: List of available couriers with estimated days and rates.
 
-**Example Response:**
-```json
-{
-  "serviceable": true,
-  "fastest_delivery": {
-    "courier_name": "Delhivery Surface",
-    "courier_company_id": 21,
-    "estimated_days": 2,
-    "estimated_delivery_date": "2025-01-06",
-    "rate": 45,
-    "is_surface": true
-  },
-  "all_options": [
-    {
-      "courier_name": "Delhivery Surface",
-      // ... details
-    },
-    // ... other couriers
-  ]
-}
-```
+### Webhook Listener (`/hooks/fulfillment/shiprocket`)
+Processes status updates from Shiprocket. Requires `SHIPROCKET_WEBHOOK_TOKEN` to be configured in both the environment and the Shiprocket dashboard.
 
-**Response Headers:**
-| Header | Description |
-| :--- | :--- |
-| `X-RateLimit-Limit` | Max requests per minute (30) |
-| `X-RateLimit-Remaining` | Requests remaining |
-| `X-Cache` | `HIT` if cached, `MISS` if fresh |
+### Tracking Details (`/store/shiprocket/tracking/:awb`)
+Retrieves the latest stored tracking information for a specific AWB, used for custom storefront tracking pages.
 
-> [!TIP]
-> Set `SHIPROCKET_PICKUP_LOCATION` in your `.env` to auto-fetch the pickup pincode from your Shiprocket account. No need to pass `pickup_pincode` in every request!
+## License
 
-## 💻 Usage Guide
-
-### Enabling the Provider
-
-1.  Log in to your **Medusa Admin**.
-2.  Go to **Settings** → **Regions**.
-3.  Select the region you want to ship to (e.g., "India").
-4.  In the **Fulfillment Providers** section, edit and ensure `shiprocket` is selected.
-5.  Save changes.
-
-### Shipping Options
-
-You can now create Shipping Options (e.g., "Standard Shipping") that use the **shiprocket** provider.
--   **Calculated**: Choose "Calculated" price type to use Shiprocket's real-time rate API.
-
-### Creating a Fulfillment (Shipment)
-When you fulfill an order in the Medusa Admin:
-1.  The plugin creates an order in Shiprocket.
-2.  It attempts to automatically assign an AWB (Air Waybill) using Shiprocket's "adhoc" API.
-3.  If successful, the **Tracking Number** and **Tracking URL** are saved to the fulfillment in Medusa.
-
-## 🐛 Troubleshooting
-
-### "Rate calculation failed"
--   Ensure both the **Store Address** (Pickup) and **Customer Address** (Delivery) have valid 6-digit Indian pincodes.
--   Check that the `weight` is set on your Product Variants (in grams or per your Shiprocket config). Shiprocket requires weight to calculate rates.
-
-### "Authentication failed"
--   Double-check your `SHIPROCKET_EMAIL` and `SHIPROCKET_PASSWORD` in `.env`.
--   The plugin auto-refreshes tokens, but invalid credentials will block this.
-
-## 🤝 Contributing
-
-Contributions are welcome! If you find a bug or want to add a feature:
-
-1.  Fork the repository.
-2.  Create a feature branch (`git checkout -b feature/amazing-feature`).
-3.  Commit your changes.
-4.  Open a Pull Request.
-
-## 📄 License
-
-This project is licensed under the [MIT License](LICENSE).
-
----
-
-<p align="center">
-  Built with ❤️ by <a href="https://github.com/SAM-AEL">SAM-AEL</a>
-</p>
+MIT License.

@@ -294,15 +294,22 @@ export default class ShiprocketClient {
                     )
                 }
 
-                const weight = Number(variant.weight || 0) / 1000 // Convert grams to kg
-                const length = Number(variant.length || 0)
-                const breadth = Number(variant.width || 0)
-                const height = Number(variant.height || 0)
+                const product = (variant as any).product
 
+                // Check Variant first (preferred), then Product as fallback
+                // Weight: Medusa uses grams. Shiprocket needs kg.
+                const weightGrams = Number(variant.weight || product?.weight || 0)
+                const weight = weightGrams / 1000
+
+                const length = Number(variant.length || product?.length || 0)
+                const breadth = Number(variant.width || product?.width || 0)
+                const height = Number(variant.height || product?.height || 0)
+
+                // Strict Validation: Shiprocket fines for incorrect dimensions
                 if (!weight || !length || !breadth || !height) {
                     throw new MedusaError(
                         MedusaError.Types.INVALID_DATA,
-                        `Missing dimensions/weight for "${item.title}". Update product variant settings.`
+                        `Missing dimensions/weight for "${item.title}". Please set them on the Variant.`
                     )
                 }
 
@@ -506,20 +513,30 @@ export default class ShiprocketClient {
     }> {
         await this.ensureToken()
 
-        const safeGet = (url: string, params: any) =>
-            this.axios.get(url, { params }).catch(() => ({ data: null }))
+        const safePost = (url: string, data: any) =>
+            this.axios.post(url, data).catch((err) => {
+                console.error(`Shiprocket API error at ${url}:`, err?.response?.data || err.message)
+                return { data: null }
+            })
 
+        // Shiprocket expects arrays for IDs even if it's just one
         const [manifestRes, labelRes, invoiceRes] = await Promise.all([
-            safeGet("/manifests/generate", { order_ids: [fulfillment.shipment_id] }),
-            safeGet("/courier/generate/label", { shipment_id: [fulfillment.shipment_id] }),
-            safeGet("/orders/print/invoice", { ids: [fulfillment.order_id] }),
+            safePost("/manifests/generate", { order_ids: [fulfillment.shipment_id] }),
+            safePost("/courier/generate/label", { shipment_id: [fulfillment.shipment_id] }),
+            safePost("/orders/print/invoice", { ids: [fulfillment.order_id] }),
         ])
 
         const extractUrl = (res: any, key: string, checkKey?: string, checkVal?: any) => {
             if (!res?.data) return ""
             const item = Array.isArray(res.data) ? res.data[0] : res.data
-            if (checkKey && item[checkKey] !== checkVal) return ""
-            return item[key] || ""
+
+            // Handle cases where Shiprocket returns { status: 1, manifest_url: "..." }
+            const data = res.data?.data || res.data
+            const target = Array.isArray(data) ? data[0] : data
+
+            if (!target) return ""
+            if (checkKey && target[checkKey] !== checkVal) return ""
+            return target[key] || ""
         }
 
         return {
@@ -535,10 +552,12 @@ export default class ShiprocketClient {
     async generateLabel(fulfillment: any): Promise<string> {
         await this.ensureToken()
         try {
-            const res = await this.axios.get("/courier/generate/label", {
-                params: { shipment_id: [fulfillment.shipment_id] },
+            const res = await this.axios.post("/courier/generate/label", {
+                shipment_id: [fulfillment.shipment_id],
             })
-            return res.data?.[0]?.label_url || ""
+            const data = res.data?.data || res.data
+            const item = Array.isArray(data) ? data[0] : data
+            return item?.label_url || ""
         } catch {
             return ""
         }
@@ -550,10 +569,12 @@ export default class ShiprocketClient {
     async generateInvoice(fulfillment: any): Promise<string> {
         await this.ensureToken()
         try {
-            const res = await this.axios.get("/orders/print/invoice", {
-                params: { ids: [fulfillment.order_id] },
+            const res = await this.axios.post("/orders/print/invoice", {
+                ids: [fulfillment.order_id],
             })
-            return res.data?.[0]?.invoice_url || ""
+            const data = res.data?.data || res.data
+            const item = Array.isArray(data) ? data[0] : data
+            return item?.invoice_url || ""
         } catch {
             return ""
         }
