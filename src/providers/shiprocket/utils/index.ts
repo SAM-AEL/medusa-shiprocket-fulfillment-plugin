@@ -29,3 +29,6 @@ export function slugify(str: string) {
         .replace(/\s+/g, '-')
         .replace(/-+/g, '-');
 }
+
+// Export validation utilities
+export { validateAndSanitizePhone, validateAndSanitizePincode, requireField } from './validation'

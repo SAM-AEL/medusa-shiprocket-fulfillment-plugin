@@ -23,6 +23,7 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
     }
 
     try {
+        const logger = req.scope.resolve("logger")
         const trackingService = req.scope.resolve<any>(SHIPROCKET_TRACKING_MODULE)
         const fulfillmentService = req.scope.resolve<any>("fulfillment")
 
@@ -39,132 +40,138 @@ export const POST = async (req: AuthenticatedMedusaRequest, res: MedusaResponse)
             password,
         })
 
-        // Fetch latest tracking from Shiprocket API
-        const trackingResponse = await client.getTrackingInfo(awb)
+        try {
 
-        if (!trackingResponse?.tracking_data) {
-            return res.status(404).json({
-                success: false,
-                error: "No tracking data found from Shiprocket"
+            // Fetch latest tracking from Shiprocket API
+            const trackingResponse = await client.getTrackingInfo(awb)
+
+            if (!trackingResponse?.tracking_data) {
+                return res.status(404).json({
+                    success: false,
+                    error: "No tracking data found from Shiprocket"
+                })
+            }
+
+            const trackingData = trackingResponse.tracking_data
+
+            // Ensure status gets saved as a string (fixing "1" vs "AWB Assigned" issue)
+            let status: any = trackingData.current_status || trackingData.track_status || "Unknown"
+
+            // Shiprocket Status Map
+            const statusMap: Record<string | number, string> = {
+                1: "AWB Assigned",
+                6: "Shipped",
+                7: "Delivered",
+                8: "Cancelled",
+                9: "RTO Initiated",
+                13: "Pickup Error",
+                17: "In Transit",
+                18: "In Transit",
+                19: "RTO In Transit",
+                20: "RTO In Transit",
+                21: "Reached Destination",
+            }
+
+            let shipmentStatus: any = trackingData.shipment_status || null
+
+            // Handle edge case where Shiprocket returns numbers for status
+            if (statusMap[status]) {
+                status = statusMap[status]
+            } else if (typeof status === "number") {
+                status = String(status)
+            }
+
+            if (shipmentStatus && statusMap[shipmentStatus]) {
+                shipmentStatus = statusMap[shipmentStatus]
+            } else if (typeof shipmentStatus === "number") {
+                shipmentStatus = String(shipmentStatus)
+            }
+
+            const trackInfo = trackingData.shipment_track?.[0]
+            const scans = trackingData.shipment_track_activities || trackingData.scans || []
+
+            // Upsert tracking data
+            const tracking = await trackingService.upsertByAwb({
+                awb: awb,
+                courier_name: trackInfo?.courier_name || trackingData.courier_name || null,
+                current_status: status,
+                current_status_id: trackingData.current_status_id || 0,
+                shipment_status: shipmentStatus,
+                shipment_status_id: trackingData.shipment_status_id || 0,
+                current_timestamp: trackingData.current_timestamp ? new Date(trackingData.current_timestamp) : new Date(),
+                etd: trackingData.etd ? new Date(trackingData.etd) : (trackInfo?.edd ? new Date(trackInfo.edd) : null),
+                awb_assigned_date: trackingData.awb_assigned_date ? new Date(trackingData.awb_assigned_date) : null,
+                pickup_scheduled_date: trackingData.pickup_scheduled_date ? new Date(trackingData.pickup_scheduled_date) : null,
+                scans: scans,
+                pod_status: trackingData.pod_status || trackInfo?.pod_status || null,
+                pod: trackingData.pod || trackInfo?.pod || null,
+                is_return: trackingData.is_return || false,
+                origin: trackInfo?.origin || null,
+                destination: trackInfo?.destination || null,
+                weight: trackInfo?.weight || null,
+                raw_payload: trackingResponse,
             })
-        }
 
-        const trackingData = trackingResponse.tracking_data
+            // Handle document generation if fulfillment_id is provided
+            let documents: { label_url: string; invoice_url: string; manifest_url: string } | null = null;
+            const fulfillmentId = (req.body as any)?.fulfillment_id
 
-        // Ensure status gets saved as a string (fixing "1" vs "AWB Assigned" issue)
-        let status: any = trackingData.current_status || trackingData.track_status || "Unknown"
+            if (fulfillmentId) {
+                try {
+                    const fulfillment = await fulfillmentService.retrieveFulfillment(fulfillmentId)
 
-        // Shiprocket Status Map
-        const statusMap: Record<string | number, string> = {
-            1: "AWB Assigned",
-            6: "Shipped",
-            7: "Delivered",
-            8: "Cancelled",
-            9: "RTO Initiated",
-            13: "Pickup Error",
-            17: "In Transit",
-            18: "In Transit",
-            19: "RTO In Transit",
-            20: "RTO In Transit",
-            21: "Reached Destination",
-        }
+                    if (fulfillment?.data?.shipment_id) {
+                        logger.debug(`Syncing documents for Shipment ID: ${fulfillment.data.shipment_id}, Order ID: ${fulfillment.data.sr_order_id || fulfillment.data.order_id}`)
 
-        let shipmentStatus: any = trackingData.shipment_status || null
+                        const docs = await client.createDocuments({
+                            shipment_id: fulfillment.data.shipment_id,
+                            order_id: fulfillment.data.sr_order_id || fulfillment.data.order_id
+                        })
 
-        // Handle edge case where Shiprocket returns numbers for status
-        if (statusMap[status]) {
-            status = statusMap[status]
-        } else if (typeof status === "number") {
-            status = String(status)
-        }
+                        logger.debug(`Documents generated from Shiprocket: ${JSON.stringify(docs)}`)
 
-        if (shipmentStatus && statusMap[shipmentStatus]) {
-            shipmentStatus = statusMap[shipmentStatus]
-        } else if (typeof shipmentStatus === "number") {
-            shipmentStatus = String(shipmentStatus)
-        }
-
-        const trackInfo = trackingData.shipment_track?.[0]
-        const scans = trackingData.shipment_track_activities || trackingData.scans || []
-
-        // Upsert tracking data
-        const tracking = await trackingService.upsertByAwb({
-            awb: awb,
-            courier_name: trackInfo?.courier_name || trackingData.courier_name || null,
-            current_status: status,
-            current_status_id: trackingData.current_status_id || 0,
-            shipment_status: shipmentStatus,
-            shipment_status_id: trackingData.shipment_status_id || 0,
-            current_timestamp: trackingData.current_timestamp ? new Date(trackingData.current_timestamp) : new Date(),
-            etd: trackingData.etd ? new Date(trackingData.etd) : (trackInfo?.edd ? new Date(trackInfo.edd) : null),
-            awb_assigned_date: trackingData.awb_assigned_date ? new Date(trackingData.awb_assigned_date) : null,
-            pickup_scheduled_date: trackingData.pickup_scheduled_date ? new Date(trackingData.pickup_scheduled_date) : null,
-            scans: scans,
-            pod_status: trackingData.pod_status || trackInfo?.pod_status || null,
-            pod: trackingData.pod || trackInfo?.pod || null,
-            is_return: trackingData.is_return || false,
-            origin: trackInfo?.origin || null,
-            destination: trackInfo?.destination || null,
-            weight: trackInfo?.weight || null,
-            raw_payload: trackingResponse,
-        })
-
-        // Handle document generation if fulfillment_id is provided
-        let documents: { label_url: string; invoice_url: string; manifest_url: string } | null = null;
-        const fulfillmentId = (req.body as any)?.fulfillment_id
-
-        if (fulfillmentId) {
-            try {
-                const fulfillment = await fulfillmentService.retrieveFulfillment(fulfillmentId)
-
-                if (fulfillment?.data?.shipment_id) {
-                    console.log(`Syncing documents for Shipment ID: ${fulfillment.data.shipment_id}, Order ID: ${fulfillment.data.sr_order_id || fulfillment.data.order_id}`)
-
-                    const docs = await client.createDocuments({
-                        shipment_id: fulfillment.data.shipment_id,
-                        order_id: fulfillment.data.sr_order_id || fulfillment.data.order_id
-                    })
-
-                    console.log("Documents generated from Shiprocket:", docs)
-
-                    documents = {
-                        label_url: docs.label,
-                        invoice_url: docs.invoice,
-                        manifest_url: docs.manifest
-                    }
-
-                    // Update fulfillment with new document URLs
-                    await fulfillmentService.updateFulfillment(fulfillmentId, {
-                        data: {
-                            ...fulfillment.data,
+                        documents = {
                             label_url: docs.label,
                             invoice_url: docs.invoice,
                             manifest_url: docs.manifest
                         }
-                    })
-                    console.log("Fulfillment updated with new document URLs")
-                } else {
-                    console.warn("Fulfillment missing shipment_id, cannot generate documents")
-                }
-            } catch (docError) {
-                console.error("Failed to update documents:", docError)
-                // Continue execution, don't fail the whole sync
-            }
-        }
 
-        return res.status(200).json({
-            success: true,
-            message: "Tracking data synced successfully",
-            tracking: {
-                id: tracking.id,
-                awb: tracking.awb,
-                current_status: tracking.current_status,
-                courier_name: tracking.courier_name,
-                etd: tracking.etd,
-                updated_at: tracking.updated_at,
-            },
-            documents // Return documents if found
-        })
+                        // Update fulfillment with new document URLs
+                        await fulfillmentService.updateFulfillment(fulfillmentId, {
+                            data: {
+                                ...fulfillment.data,
+                                label_url: docs.label,
+                                invoice_url: docs.invoice,
+                                manifest_url: docs.manifest
+                            }
+                        })
+                        logger.debug("Fulfillment updated with new document URLs")
+                    } else {
+                        logger.warn("Fulfillment missing shipment_id, cannot generate documents")
+                    }
+                } catch (docError) {
+                    logger.error(`Failed to update documents: ${(docError as Error).message}`)
+                    // Continue execution, don't fail the whole sync
+                }
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Tracking data synced successfully",
+                tracking: {
+                    id: tracking.id,
+                    awb: tracking.awb,
+                    current_status: tracking.current_status,
+                    courier_name: tracking.courier_name,
+                    etd: tracking.etd,
+                    updated_at: tracking.updated_at,
+                },
+                documents // Return documents if found
+            })
+        } finally {
+            // Always dispose client
+            client.dispose()
+        }
     } catch (error: any) {
         const logger = req.scope.resolve("logger")
         logger.error(`Admin tracking sync error: ${error.message}`, error)

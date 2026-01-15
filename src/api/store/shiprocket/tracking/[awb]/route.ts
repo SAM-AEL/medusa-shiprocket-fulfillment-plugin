@@ -60,14 +60,17 @@ export const GET = async (req: MedusaRequest, res: MedusaResponse) => {
                     })
                 }
             } catch (e) {
-                // formatting error or module missing - log but don't crash if optional
+                // Ownership verification failed - deny access for security
                 const logger = req.scope.resolve("logger")
-                logger.warn(`Tracking ownership check failed: ${(e as Error).message}`)
-                // If we can't verify, we should probably deny in a strict environment, 
-                // but let's assume if Auth fails it might be a system/admin access issue.
-                // For now, let's deny if error happens during retrieval of existing order
-                if ((e as Error).message.includes("not found") === false) {
-                    // Only deny if it wasn't a "order not found" error (which shouldn't happen if ID exists)
+                logger.warn(`Tracking ownership check failed for AWB ${awb}: ${(e as Error).message}`)
+
+                // If the error is not "order not found", deny access
+                // (order not found shouldn't happen if ID exists, so it's likely a system error)
+                if (!(e as Error).message.toLowerCase().includes("not found")) {
+                    return res.status(403).json({
+                        success: false,
+                        error: "Access denied. Unable to verify order ownership."
+                    })
                 }
             }
         }

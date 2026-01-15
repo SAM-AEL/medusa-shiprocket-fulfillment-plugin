@@ -12,6 +12,7 @@ class RateLimiter {
     private requests = new Map<string, RateLimitEntry>()
     private readonly maxRequests: number
     private readonly windowMs: number
+    private readonly maxCacheSize = 10000 // Prevent unbounded memory growth
 
     constructor(maxRequests: number = 30, windowMs: number = 60 * 1000) {
         // Default: 30 requests per minute per IP
@@ -27,6 +28,11 @@ class RateLimiter {
      * @returns true if allowed, false if rate limited
      */
     isAllowed(identifier: string): boolean {
+        // Force cleanup if cache grows too large
+        if (this.requests.size >= this.maxCacheSize) {
+            this.cleanup()
+        }
+
         const now = Date.now()
         const entry = this.requests.get(identifier)
 

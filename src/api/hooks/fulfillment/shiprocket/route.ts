@@ -1,7 +1,20 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
+import crypto from "crypto"
 
 // Module identifier - must match what's registered in medusa-config.ts
 const SHIPROCKET_TRACKING_MODULE = "shiprocketTrackingModuleService"
+
+/**
+ * Constant-time string comparison to prevent timing attacks.
+ * Uses crypto.timingSafeEqual to ensure comparison time is independent of input values.
+ */
+function constantTimeCompare(a: string, b: string): boolean {
+    if (a.length !== b.length) return false
+    return crypto.timingSafeEqual(
+        Buffer.from(a, 'utf8'),
+        Buffer.from(b, 'utf8')
+    )
+}
 
 interface ShiprocketWebhookScan {
     date: string
@@ -56,7 +69,7 @@ export const POST = async (req: MedusaRequest, res: MedusaResponse) => {
             })
         }
 
-        if (!token || token !== expectedToken) {
+        if (!token || !constantTimeCompare(token, expectedToken)) {
             logger.warn("Shiprocket webhook: Invalid or missing token")
             return res.status(401).json({
                 success: false,

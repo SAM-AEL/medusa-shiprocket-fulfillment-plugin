@@ -62,6 +62,7 @@ class ShipRocketFulfillmentProviderService extends AbstractFulfillmentProviderSe
             password: options.password,
             pickup_location: options.pickup_location,
             timeout: options.timeout,
+            logger: logger,
         });
 
         this.logger_.info("Shiprocket fulfillment provider initialized");

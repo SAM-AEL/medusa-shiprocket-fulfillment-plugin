@@ -1,6 +1,5 @@
 import { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import ShiprocketClient from "../../../../providers/shiprocket/client"
-import { deliveryEstimateCache, getCacheKey } from "./cache"
+import { getShiprocketManager, hasShiprocketCredentials } from "../../../../providers/shiprocket/client/manager"
 import { rateLimiter, getClientIdentifier } from "./rate-limiter"
 
 // Make this route public (no publishable API key required)
@@ -16,19 +15,13 @@ let cachedPickupPincode: { value: string; expiresAt: number } | null = null
  * 
  * Features:
  * - Rate limited: 30 requests per minute per IP
- * - Cached: Results cached for 10 minutes
- * - Auto-fetches pickup pincode from Shiprocket using SHIPROCKET_PICKUP_LOCATION
+ * - Uses singleton client manager with token caching (zero auth overhead)
  * 
  * Query parameters:
  * - delivery_pincode: The delivery destination pincode (required)
  * - pickup_pincode: The pickup location pincode (optional, auto-fetched from SHIPROCKET_PICKUP_LOCATION)
  * - weight: Package weight in kg (optional, defaults to 0.5)
  * - cod: Cash on delivery flag, 0 or 1 (optional, defaults to 0)
- * 
- * Returns:
- * - serviceable: boolean indicating if delivery is possible
- * - fastest_delivery: the fastest courier option with estimated date
- * - all_options: all available courier options sorted by delivery time
  */
 export async function GET(
     req: MedusaRequest,
@@ -59,13 +52,8 @@ export async function GET(
         cod?: string
     }
 
-    // Get credentials from environment
-    const email = process.env.SHIPROCKET_EMAIL
-    const password = process.env.SHIPROCKET_PASSWORD
-    const pickupLocation = process.env.SHIPROCKET_PICKUP_LOCATION
-
     // Validate credentials are configured
-    if (!email || !password) {
+    if (!hasShiprocketCredentials()) {
         return res.status(500).json({
             error: "Configuration error",
             message: "Shiprocket credentials not configured. Set SHIPROCKET_EMAIL and SHIPROCKET_PASSWORD environment variables.",
@@ -89,11 +77,12 @@ export async function GET(
         })
     }
 
-    let client: ShiprocketClient | null = null
+    const logger = req.scope.resolve("logger")
 
     try {
-        // Create client instance
-        client = new ShiprocketClient({ email, password })
+        // Get singleton client manager (reuses token and connection across requests)
+        const manager = getShiprocketManager(logger)
+        const pickupLocation = manager.getPickupLocation()
 
         // Determine pickup pincode
         let pickupPincode = pickup_pincode
@@ -103,8 +92,8 @@ export async function GET(
             if (cachedPickupPincode && Date.now() < cachedPickupPincode.expiresAt) {
                 pickupPincode = cachedPickupPincode.value
             } else if (pickupLocation) {
-                // Fetch from Shiprocket using the location name
-                const fetchedPincode = await client.getPickupPincode(pickupLocation)
+                // Fetch from Shiprocket using the manager (uses cached token)
+                const fetchedPincode = await manager.getPickupPincode(pickupLocation)
                 if (fetchedPincode) {
                     pickupPincode = fetchedPincode
                     // Cache for 1 hour
@@ -131,42 +120,20 @@ export async function GET(
             })
         }
 
-        // Check cache for delivery estimate
-        const cacheKey = getCacheKey(
-            pickupPincode,
-            delivery_pincode,
-            weight ? parseFloat(weight) : undefined,
-            cod ? parseInt(cod) : undefined
-        )
-        const cachedResult = deliveryEstimateCache.get(cacheKey)
-        if (cachedResult) {
-            res.setHeader("X-Cache", "HIT")
-            return res.json(cachedResult)
-        }
-        res.setHeader("X-Cache", "MISS")
-
-        // Get delivery estimate
-        const estimate = await client.getDeliveryEstimate({
+        // Get delivery estimate using manager (uses cached token and connection)
+        const estimate = await manager.getDeliveryEstimate({
             pickup_postcode: pickupPincode,
             delivery_postcode: delivery_pincode,
             weight: weight ? parseFloat(weight) : undefined,
             cod: cod ? parseInt(cod) : undefined,
         })
 
-        // Cache the result
-        deliveryEstimateCache.set(cacheKey, estimate)
-
         return res.json(estimate)
     } catch (error: any) {
-        console.error("Delivery estimate error:", error)
+        logger.error(`Delivery estimate error: ${error.message}`)
         return res.status(500).json({
             error: "Failed to get delivery estimate",
             message: error.message || "An unexpected error occurred",
         })
-    } finally {
-        // Dispose client after use
-        if (client) {
-            client.dispose()
-        }
     }
 }

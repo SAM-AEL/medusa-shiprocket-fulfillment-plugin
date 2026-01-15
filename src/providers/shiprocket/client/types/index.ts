@@ -1,10 +1,12 @@
 import { AxiosError } from "axios"
+import { Logger } from "@medusajs/framework/types"
 
 export interface ShiprocketClientOptions {
     email: string
     password: string
     pickup_location?: string
     timeout?: number
+    logger?: Logger
 }
 
 export interface ShiprocketError {
@@ -28,9 +30,12 @@ export interface ShiprocketCalculateRateRequest {
 export interface ShiprocketCourierCompany {
     id: number
     courier_name: string
+    courier_company_id: number
     rate: string
-    days: string
+    estimated_delivery_days: string  // Shiprocket returns this, not "days"
     is_surface: boolean
+    etd?: string  // "Jan 14, 2026" format
+    etd_hours?: number
 }
 
 export interface ShiprocketCalculateRateResponse {
@@ -120,6 +125,7 @@ export interface ShiprocketDeliveryEstimate {
 export interface ShiprocketDeliveryEstimateResponse {
     serviceable: boolean
     fastest_delivery: ShiprocketDeliveryEstimate | null
+    cheapest_delivery: ShiprocketDeliveryEstimate | null
     all_options: ShiprocketDeliveryEstimate[]
 }
 

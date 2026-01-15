@@ -2,6 +2,8 @@ import axios, { AxiosInstance } from "axios"
 import { MedusaError } from "@medusajs/utils"
 import { authenticate } from "./methods/authenticate"
 import { handleError } from "./handle-error"
+import { getShiprocketManager } from "./manager"
+import { validateAndSanitizePhone, validateAndSanitizePincode, requireField } from "../utils/validation"
 
 import type {
     ShiprocketClientOptions,
@@ -166,13 +168,13 @@ export default class ShiprocketClient {
     }
 
     /**
-     * Get delivery estimate for a route - returns fastest delivery date
+     * Get delivery estimate for a route - returns raw Shiprocket API response
      */
-    async getDeliveryEstimate(data: ShiprocketDeliveryEstimateRequest): Promise<ShiprocketDeliveryEstimateResponse> {
+    async getDeliveryEstimate(data: ShiprocketDeliveryEstimateRequest): Promise<any> {
         await this.ensureToken()
 
         try {
-            const response = await this.axios.get<ShiprocketCalculateRateResponse>(
+            const response = await this.axios.get(
                 "/courier/serviceability/",
                 {
                     params: {
@@ -184,49 +186,13 @@ export default class ShiprocketClient {
                 }
             )
 
-            const availableCouriers = response.data.data.available_courier_companies
-
-            if (!availableCouriers?.length) {
-                return {
-                    serviceable: false,
-                    fastest_delivery: null,
-                    all_options: [],
-                }
-            }
-
-            // Calculate estimated delivery date based on days
-            const today = new Date()
-            const calculateDeliveryDate = (days: number): string => {
-                const deliveryDate = new Date(today)
-                deliveryDate.setDate(deliveryDate.getDate() + days)
-                return deliveryDate.toISOString().split("T")[0]
-            }
-
-            // Map and sort by delivery days (fastest first)
-            const allOptions = availableCouriers
-                .map((courier) => ({
-                    courier_name: courier.courier_name,
-                    courier_company_id: courier.id,
-                    estimated_days: parseInt(courier.days) || 0,
-                    estimated_delivery_date: calculateDeliveryDate(parseInt(courier.days) || 0),
-                    rate: Math.ceil(Number(courier.rate) || 0),
-                    is_surface: courier.is_surface,
-                }))
-                .sort((a, b) => a.estimated_days - b.estimated_days)
-
-            return {
-                serviceable: true,
-                fastest_delivery: allOptions[0] || null,
-                all_options: allOptions,
-            }
+            return response.data
         } catch (error: any) {
             if (error instanceof MedusaError) throw error
-            // Return not serviceable for 404 errors
             if (error?.response?.status === 404) {
                 return {
-                    serviceable: false,
-                    fastest_delivery: null,
-                    all_options: [],
+                    status: 404,
+                    data: { available_courier_companies: [] }
                 }
             }
             handleError(error, { operation: "getDeliveryEstimate" })
@@ -243,15 +209,7 @@ export default class ShiprocketClient {
     ): Promise<ShiprocketCreateOrderResponse> {
         await this.ensureToken()
 
-        const require = (val: any, name: string) => {
-            if (val === undefined || val === null || val === "") {
-                throw new MedusaError(
-                    MedusaError.Types.INVALID_DATA,
-                    `Missing required field: ${name}`
-                )
-            }
-            return val
-        }
+
 
         // Map order items by ID for quick lookup
         const orderItemMap = new Map()
@@ -329,28 +287,28 @@ export default class ShiprocketClient {
                 order_date: orderDate,
                 pickup_location: this.pickup_location || "Primary",
 
-                billing_customer_name: require(billing.first_name, "Billing First Name"),
+                billing_customer_name: requireField(billing.first_name, "Billing First Name"),
                 billing_last_name: billing.last_name || "",
-                billing_address: require(shipping.address_1 || billing.address_1, "Billing Address"),
+                billing_address: requireField(shipping.address_1 || billing.address_1, "Billing Address"),
                 billing_address_2: shipping.address_2 || billing.address_2 || "",
-                billing_city: require(shipping.city || billing.city, "Billing City"),
-                billing_pincode: Number(require(shipping.postal_code || billing.postal_code, "Billing Pincode")),
-                billing_state: require(shipping.province || billing.province, "Billing State"),
-                billing_country: require(shipping.country_code || billing.country_code || "IN", "Billing Country"),
-                billing_email: require(billing.email || order.email, "Billing Email"),
-                billing_phone: Number(require(shipping.phone || billing.phone, "Billing Phone").toString().replace(/[^0-9]/g, "")),
+                billing_city: requireField(shipping.city || billing.city, "Billing City"),
+                billing_pincode: validateAndSanitizePincode(requireField(shipping.postal_code || billing.postal_code, "Billing Pincode"), "Billing Pincode"),
+                billing_state: requireField(shipping.province || billing.province, "Billing State"),
+                billing_country: requireField(shipping.country_code || billing.country_code || "IN", "Billing Country"),
+                billing_email: requireField(billing.email || order.email, "Billing Email"),
+                billing_phone: validateAndSanitizePhone(requireField(shipping.phone || billing.phone, "Billing Phone"), "Billing Phone"),
 
                 shipping_is_billing: true,
-                shipping_customer_name: require(shipping.first_name, "Shipping First Name"),
+                shipping_customer_name: requireField(shipping.first_name, "Shipping First Name"),
                 shipping_last_name: shipping.last_name || "",
-                shipping_address: require(shipping.address_1, "Shipping Address"),
+                shipping_address: requireField(shipping.address_1, "Shipping Address"),
                 shipping_address_2: shipping.address_2 || "",
-                shipping_city: require(shipping.city, "Shipping City"),
-                shipping_pincode: Number(require(shipping.postal_code, "Shipping Pincode")),
-                shipping_country: require(shipping.country_code || "IN", "Shipping Country"),
-                shipping_state: require(shipping.province, "Shipping State"),
-                shipping_email: require(billing.email || order.email, "Shipping Email"),
-                shipping_phone: Number(require(shipping.phone, "Shipping Phone").toString().replace(/[^0-9]/g, "")),
+                shipping_city: requireField(shipping.city, "Shipping City"),
+                shipping_pincode: validateAndSanitizePincode(requireField(shipping.postal_code, "Shipping Pincode"), "Shipping Pincode"),
+                shipping_country: requireField(shipping.country_code || "IN", "Shipping Country"),
+                shipping_state: requireField(shipping.province, "Shipping State"),
+                shipping_email: requireField(billing.email || order.email, "Shipping Email"),
+                shipping_phone: validateAndSanitizePhone(requireField(shipping.phone, "Shipping Phone"), "Shipping Phone"),
 
                 order_items: items.map((item) => {
                     const orderItem = orderItemMap.get(item.line_item_id)!
@@ -401,8 +359,29 @@ export default class ShiprocketClient {
                 )
             }
 
-            // Assign AWB
-            const awbPayload = { shipment_id: orderCreated.data.shipment_id }
+            // Try to get preferred courier based on SHIPROCKET_DELIVERY_PREFERENCE env
+            let courierId: number | null = null
+            try {
+                const manager = getShiprocketManager()
+                const pickupPincode = shipping.postal_code || shipping.zip
+                const deliveryPincode = billing.postal_code || billing.zip
+                if (pickupPincode && deliveryPincode) {
+                    courierId = await manager.getPreferredCourier({
+                        pickup_postcode: pickupPincode,
+                        delivery_postcode: deliveryPincode,
+                        weight: totalWeight,
+                        cod: order.payment_status === 'awaiting' ? 1 : 0,
+                    })
+                }
+            } catch {
+                // Fallback to auto-assign if courier selection fails
+            }
+
+            // Assign AWB with optional courier_id
+            const awbPayload: any = { shipment_id: orderCreated.data.shipment_id }
+            if (courierId) {
+                awbPayload.courier_id = courierId
+            }
             const awbCreated = await this.axios.post("/courier/assign/awb", awbPayload)
 
             if (awbCreated.data.awb_assign_status !== 1) {

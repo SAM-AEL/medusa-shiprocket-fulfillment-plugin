@@ -1,80 +1,77 @@
-<p align="center">
-  <a href="https://www.shiprocket.in">
-    <img src="https://custom-icon-badges.demolab.com/badge/Shiprocket-purple?style=for-the-badge&logo=package&logoColor=white" alt="Shiprocket Logo" height="50">
-  </a>
-</p>
+# Shiprocket Fulfillment Plugin for Medusa v2
 
-<h1 align="center">Medusa Shiprocket Fulfillment Plugin</h1>
+Full-featured Shiprocket integration for Medusa e-commerce stores operating in India.
 
-<p align="center">
-  <strong>Logistics integration for Medusa v2 stores in the Indian market.</strong>
-</p>
+[![npm version](https://img.shields.io/npm/v/medusa-shiprocket-fulfillment-plugin?style=flat-square)](https://www.npmjs.com/package/medusa-shiprocket-fulfillment-plugin)
+[![License: MIT](https://img.shields.io/github/license/SAM-AEL/medusa-shiprocket-fulfillment-plugin?style=flat-square)](LICENSE)
 
-<p align="center">
-  <a href="https://www.npmjs.com/package/medusa-shiprocket-fulfillment-plugin">
-    <img src="https://img.shields.io/npm/v/medusa-shiprocket-fulfillment-plugin?color=blue&style=flat-square" alt="NPM Version">
-  </a>
-  <a href="https://www.npmjs.com/package/medusa-shiprocket-fulfillment-plugin">
-    <img src="https://img.shields.io/npm/dw/medusa-shiprocket-fulfillment-plugin?style=flat-square" alt="NPM Downloads">
-  </a>
-  <a href="https://github.com/SAM-AEL/medusa-shiprocket-fulfillment-plugin/blob/main/LICENSE">
-    <img src="https://img.shields.io/github/license/SAM-AEL/medusa-shiprocket-fulfillment-plugin?style=flat-square" alt="License">
-  </a>
-</p>
+---
 
-<hr />
+## Features
 
-## Overview
+### Checkout & Storefront
+- **Dynamic shipping rates** based on destination pincode and package weight
+- **Delivery estimates** with fastest courier options
+- **Serviceability check** for pincode validation
+- **Real-time tracking** with scan history and status updates
 
-The **Medusa Shiprocket Fulfillment Plugin** provides a direct integration with [Shiprocket](https://www.shiprocket.in/), allowing Medusa v2 stores to manage shipping operations within India. It automates fulfillment workflows, provides delivery estimates at checkout, and handles post-purchase tracking and documentation.
+### Admin Dashboard
+- **Unified admin widget** for shipment management on order pages
+- **Manual sync** for tracking data and document regeneration
+- **Document downloads** (labels, invoices, manifests)
+- **Interactive timeline** showing shipment lifecycle with human-readable statuses
 
-## Core Features
+### Fulfillment Operations
+- **Auto shipment creation** in Shiprocket when fulfillment is created
+- **AWB auto-assignment** with courier selection based on preference
+- **Return shipments** support
+- **Order cancellation** through Medusa admin
+- **Webhook integration** for real-time status synchronization
 
-| Feature | Functionality |
-| :--- | :--- |
-| **Real-time Rates** | Support for dynamic shipping rate calculation at checkout based on destination pincode and weight. |
-| **Delivery Estimates** | Public API for surfacing estimated delivery dates and fastest courier options on the storefront. |
-| **Automated Shipments** | Automated order creation in Shiprocket and AWB assignment during Medusa fulfillment. |
-| **Document Management** | One-click generation and retrieval of Shipping Labels, Manifests, and Invoices. |
-| **Admin Tracking** | Integrated dashboard widget for real-time shipment status, scan history, and manual synchronization. |
-| **Webhook Support** | Native listener for Shiprocket status updates to keep the database and customer informed. |
-| **Returns & Cancellations** | Support for creating return shipments and cancelling existing orders directly from Medusa. |
+### Technical
+- **HTTP keep-alive** connection pooling for performance
+- **Token caching** (8-day refresh cycle)
+- **Delivery estimate caching** (4-hour TTL)
+- **Rate limiting** (30 req/min per IP on public endpoints)
+- **LRU cache** with bounded memory
+- **Timing-attack resistant** webhook authentication
 
-## Prerequisites
-
-- **Medusa v2** installed and configured.
-- A registered **Shiprocket Account**.
-- Configured **Pickup Locations** in the Shiprocket dashboard.
+---
 
 ## Installation
 
-Install the package via yarn or npm:
-
 ```bash
 yarn add medusa-shiprocket-fulfillment-plugin
-# or
-npm install medusa-shiprocket-fulfillment-plugin
 ```
+
+---
 
 ## Configuration
 
-### 1. Environment Variables
+### Environment Variables
 
-Store your credentials and configuration in your `.env` file:
+Add to your `.env`:
 
 ```bash
+# Required
 SHIPROCKET_EMAIL="your_email@example.com"
 SHIPROCKET_PASSWORD="your_shiprocket_password"
-SHIPROCKET_PICKUP_LOCATION="Primary" # Nickname of the pickup location in Shiprocket
-SHIPROCKET_WEBHOOK_TOKEN="secure-token" # Used to authenticate incoming status updates
+
+# Optional
+SHIPROCKET_PICKUP_LOCATION="Primary"           # Pickup location nickname
+SHIPROCKET_WEBHOOK_TOKEN="secure_random_token" # Webhook auth token
+SHIPROCKET_DELIVERY_PREFERENCE="FAST"          # FAST or CHEAP (default: FAST)
 ```
 
-### 2. Medusa Config
+### Medusa Config
 
-The plugin requires registration as both a fulfillment module and a standard plugin in `medusa-config.ts`:
+Add to `medusa-config.ts`:
 
 ```typescript
-module.exports = defineConfig({
+import { defineConfig } from "@medusajs/framework/utils"
+
+export default defineConfig({
+  // Register as fulfillment provider
   modules: [
     {
       resolve: "@medusajs/medusa/fulfillment",
@@ -87,51 +84,430 @@ module.exports = defineConfig({
               email: process.env.SHIPROCKET_EMAIL,
               password: process.env.SHIPROCKET_PASSWORD,
               pickup_location: process.env.SHIPROCKET_PICKUP_LOCATION,
-              cod: "false", // Enable string "true" for COD support
+              cod: "false", // "true" to enable Cash on Delivery
             },
           },
         ],
       },
     },
   ],
+  
+  // Register as plugin for admin UI and webhooks
   plugins: [
     {
       resolve: "medusa-shiprocket-fulfillment-plugin",
       options: {},
     },
   ],
-});
+})
 ```
 
-## Admin Experience
+### Shiprocket Dashboard Setup
 
-The plugin includes a redesigned **Shipment & Tracking** widget that appears on order detail pages.
+1. **Create API credentials**:
+   - Login to Shiprocket → Settings → API
+   - Generate API credentials
+   - Add to your `.env` file
 
-### Real-time Synchronization
-The widget provides a **Sync Status** button that allows admins to manually refresh tracking data from Shiprocket. This action also regenerates and updates shipping documents if they were previously unavailable.
+2. **Configure pickup location**:
+   - Settings → Pickup Addresses
+   - Set a nickname (e.g., "Primary")
+   - Use this in `SHIPROCKET_PICKUP_LOCATION`
 
-### Document Management
-A unified 3-column quick-action grid provides immediate access to:
-- **Shipping Label**: Direct download for the assigned courier label.
-- **Invoice**: Access to the Shiprocket-generated order invoice.
-- **Manifest**: Retrieval of the carrier manifest for pickup.
+3. **Setup webhook** (optional but recommended):
+   - Settings → Webhooks → Add Webhook
+   - URL: `https://your-domain.com/hooks/fulfillment/shiprocket`
+   - Add header: `x-api-key: YOUR_SHIPROCKET_WEBHOOK_TOKEN`
+   - Save
 
-### Tracking Timeline
-A detailed, interactive timeline displays the full lifecycle of a shipment, mapping Shiprocket's internal status codes to human-readable activities with timestamped location updates.
+---
 
 ## API Reference
 
-### Delivery Estimates (`/store/shiprocket/delivery-estimate`)
-A public endpoint used during the checkout process to show serviceability and estimated delivery times.
-- **Query Params**: `delivery_pincode`, `pickup_pincode` (optional), `weight`, `cod`.
-- **Response**: List of available couriers with estimated days and rates.
+### Store APIs (Public)
 
-### Webhook Listener (`/hooks/fulfillment/shiprocket`)
-Processes status updates from Shiprocket. Requires `SHIPROCKET_WEBHOOK_TOKEN` to be configured in both the environment and the Shiprocket dashboard.
+#### `GET /store/shiprocket/delivery-estimate`
 
-### Tracking Details (`/store/shiprocket/tracking/:awb`)
-Retrieves the latest stored tracking information for a specific AWB, used for custom storefront tracking pages.
+Get delivery estimates for a pincode.
+
+**Query Parameters**:
+```typescript
+{
+  delivery_pincode: string      // Required - 6-digit Indian pincode
+  pickup_pincode?: string        // Optional - Auto-fetched from SHIPROCKET_PICKUP_LOCATION
+  weight?: number                // Optional - Package weight in kg (default: 0.5)
+  cod?: 0 | 1                    // Optional - Cash on delivery flag (default: 0)
+}
+```
+
+**Response**:
+```typescript
+{
+  serviceable: boolean
+  preference: "FAST" | "CHEAP"
+  courier_name: string | null
+  courier_company_id: number | null
+  etd: string | null                    // ISO date
+  estimated_delivery_days: number | null
+  rate: number | null
+  is_surface: boolean | null
+  courier_count: number
+}
+```
+
+**Example**:
+```bash
+curl "https://your-store.com/store/shiprocket/delivery-estimate?delivery_pincode=110001"
+```
+
+**Features**:
+- Rate limited: 30 requests/min per IP
+- Cached for 4 hours per unique route
+- No authentication required
+
+---
+
+#### `GET /store/shiprocket/tracking/:awb`
+
+Get tracking information for an AWB (Air Waybill number).
+
+**Response**:
+```typescript
+{
+  awb: string
+  courier_name: string
+  current_status: string
+  etd: Date | null
+  scans: Array<{
+    date: string
+    status: string
+    activity: string
+    location: string
+  }>
+}
+```
+
+**Example**:
+```bash
+curl "https://your-store.com/store/shiprocket/tracking/SHPR12345"
+```
+
+---
+
+### Admin APIs (Authenticated)
+
+#### `POST /admin/shiprocket/tracking/:awb/sync`
+
+Manually sync tracking data and regenerate documents.
+
+**Request Body** (optional):
+```typescript
+{
+  fulfillment_id?: string  // Auto-updates fulfillment with new document URLs
+}
+```
+
+**Response**:
+```typescript
+{
+  success: true
+  message: "Tracking data synced successfully"
+  tracking: {
+    id: string
+    awb: string
+    current_status: string
+    courier_name: string
+    etd: Date | null
+    updated_at: Date
+  }
+  documents?: {
+    label_url: string
+    invoice_url: string
+    manifest_url: string
+  }
+}
+```
+
+---
+
+### Webhook Endpoint
+
+#### `POST /hooks/fulfillment/shiprocket`
+
+Receives real-time shipment updates from Shiprocket.
+
+**Authentication**: Requires `x-api-key` header matching `SHIPROCKET_WEBHOOK_TOKEN`.
+
+**Payload**: Automatically handled by Shiprocket. Updates tracking database and emits `shiprocket.tracking.updated` event.
+
+---
+
+## Admin Widget
+
+The plugin adds a **Shipment & Tracking** widget to order detail pages in the Medusa admin.
+
+### Features
+
+1. **Status Overview**
+   - Current shipment status with color-coded badge
+   - Courier name and AWB number
+   - Estimated delivery date
+
+2. **Quick Actions**
+   - Download shipping label
+   - Download invoice
+   - Download manifest
+   - Sync tracking data
+
+3. **Tracking Timeline**
+   - Interactive timeline with all scan events
+   - Location and timestamp for each update
+   - Human-readable status descriptions
+
+4. **Automatic Updates**
+   - Real-time via webhooks
+   - Manual sync on demand
+   - Auto-refresh on fulfillment creation
+
+---
+
+## Fulfillment Workflow
+
+### Creating a Shipment
+
+1. **Admin creates fulfillment** in Medusa
+2. **Plugin validates** order data (dimensions, weight, addresses)
+3. **Creates order** in Shiprocket
+4. **Auto-assigns AWB** with preferred courier
+5. **Generates documents** (label, invoice, manifest)
+6. **Returns tracking info** to Medusa
+
+### Courier Selection
+
+Uses `SHIPROCKET_DELIVERY_PREFERENCE`:
+- **FAST** (default): Selects courier with fastest delivery
+- **CHEAP**: Selects courier with lowest rate
+
+### Tracking Updates
+
+Two methods:
+1. **Webhooks**: Real-time updates from Shiprocket (recommended)
+2. **Manual Sync**: On-demand via admin widget
+
+### Cancellation
+
+Through Medusa admin → Fulfillment → Cancel
+- Cancels order in Shiprocket
+- Updates local tracking status
+
+### Returns
+
+Create return fulfillment in Medusa:
+- Generates return AWB in Shiprocket
+- Creates reverse shipment
+- Provides return label
+
+---
+
+## Data Validation
+
+The plugin validates all inputs to prevent errors:
+
+### Phone Numbers
+- Must be 10 digits
+- Auto-sanitizes (removes spaces, dashes, +91)
+- Clear error: `"Phone must be 10 digits, got 3: ABC-123"`
+
+### Pincodes
+- Must be 6 digits
+- Auto-sanitizes non-numeric characters
+- Clear error: `"Pincode must be 6 digits, got 5: 12345"`
+
+### Dimensions & Weight
+- Required for all variants
+- Must be set on Product → Variant details
+- Weight in grams (converted to kg for Shiprocket)
+- Length, width, height in cm
+
+---
+
+## Performance
+
+### Caching Strategy
+
+| Cache Type | TTL | Max Size | Eviction |
+|-----------|-----|----------|----------|
+| Auth Token | 8 days | 1 entry | Time-based |
+| Delivery Estimates | 4 hours | 1,000 entries | LRU |
+| Pickup Pincodes | 1 hour | 1 entry | Time-based |
+| Rate Limiter | 1 minute | 10,000 IPs | Time + Size |
+
+### Connection Pooling
+
+- **HTTP keep-alive** enabled
+- Max 10 concurrent connections to Shiprocket
+- Shared axios instance across all requests
+- Auto-reconnect on 401 errors
+
+### Rate Limiting
+
+Public endpoints:
+- 30 requests per minute per IP
+- X-RateLimit headers in responses
+- 429 status when exceeded
+
+---
+
+## Events
+
+The plugin emits events you can subscribe to:
+
+### `shiprocket.tracking.updated`
+
+```typescript
+{
+  awb: string
+  tracking_id: string
+  current_status: string
+  shipment_status_id: number
+}
+```
+
+**Example Subscriber**:
+```typescript
+// src/subscribers/shiprocket-notifications.ts
+export default async function (container) {
+  const eventBus = container.resolve("event_bus")
+  
+  eventBus.subscribe("shiprocket.tracking.updated", async (data) => {
+    // Send notification to customer
+    console.log(`Shipment ${data.awb} status: ${data.current_status}`)
+  })
+}
+```
+
+---
+
+## Troubleshooting
+
+### "Missing dimensions/weight for product"
+
+**Cause**: Product variant doesn't have weight/dimensions set.
+
+**Fix**: 
+1. Go to Products → Select Product → Variants
+2. Click variant → Edit
+3. Set Weight (grams), Length, Width, Height (cm)
+
+---
+
+### "No couriers available for route"
+
+**Cause**: Shiprocket doesn't service the delivery pincode, or pickup location not configured.
+
+**Fix**:
+1. Verify pincode serviceability on Shiprocket dashboard
+2. Check `SHIPROCKET_PICKUP_LOCATION` matches Shiprocket nickname exactly
+3. Ensure pickup location has valid address with pincode
+
+---
+
+### Webhook not receiving updates
+
+**Cause**: Webhook URL or token misconfigured.
+
+**Fix**:
+1. Verify webhook URL is publicly accessible
+2. Check `x-api-key` header in Shiprocket dashboard matches `SHIPROCKET_WEBHOOK_TOKEN`
+3. Test webhook with manual sync button in admin
+
+---
+
+### Rate limit exceeded on delivery estimate
+
+**Cause**: More than 30 requests per minute from same IP.
+
+**Fix**:
+- Cache delivery estimates on your frontend
+- Use the 4-hour server-side cache by reusing same route params
+- Check `X-RateLimit-Remaining` header
+
+---
+
+## Development
+
+### Building the Plugin
+
+```bash
+yarn build
+```
+
+### Local Testing with yalc
+
+```bash
+# In plugin directory
+npx yalc push
+
+# In your Medusa project
+npx yalc add medusa-shiprocket-fulfillment-plugin
+yarn install
+```
+
+### Running Tests
+
+```bash
+yarn test
+```
+
+---
+
+## Security
+
+- ✅ Timing-attack resistant webhook authentication
+- ✅ Input validation for all user data
+- ✅ Rate limiting on public endpoints
+- ✅ No credentials in logs or error messages
+- ✅ HTTPS-only API communication
+- ✅ Environment variable configuration
+
+---
+
+## Requirements
+
+- **Medusa**: v2.12.3+
+- **Node.js**: v20+
+- **Shiprocket Account**: Active with API access
+
+---
 
 ## License
 
-MIT License.
+MIT License - see [LICENSE](LICENSE) file for details.
+
+---
+
+## Support
+
+For issues or questions:
+- **GitHub Issues**: [Report a bug](https://github.com/SAM-AEL/medusa-shiprocket-fulfillment-plugin/issues)
+- **Documentation**: [Shiprocket API Docs](https://apidocs.shiprocket.in/)
+
+---
+
+## Changelog
+
+### 0.4.2 (2026-01-15)
+- Added timing-attack resistant token comparison
+- Implemented bounded cache sizes with LRU eviction
+- Enhanced phone/pincode validation with clear error messages
+- Memory optimization for high-traffic scenarios
+
+### 0.4.1
+- Admin widget improvements
+- Document generation enhancements
+- Tracking sync reliability
+
+### 0.4.0
+- Initial release for Medusa v2
+- Full Shiprocket API integration
+- Admin dashboard widgets
