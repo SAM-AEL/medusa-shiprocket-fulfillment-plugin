@@ -1,6 +1,6 @@
 {
   "name": "medusa-shiprocket-fulfillment-plugin",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Shiprocket Fulfillment Provider Plugin for MedusaJS 2",
   "author": "SAM-AEL",
   "homepage": "https://github.com/SAM-AEL",
